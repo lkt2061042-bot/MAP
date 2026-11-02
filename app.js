@@ -1,11 +1,5 @@
 /* =========================================================
- * app.js — 主程式：狀態、導航流程、動畫迴圈
- *
- * 核心概念
- *   state.user         真實（推算）位置 → 紅箭頭永遠畫在它上面
- *   state.marker       虛擬標記（「等等我」用的參考點）
- *   state.arrowHeading 畫在螢幕上的方位角 = 感應器方位 + 校正偏移
- *   走路時 user 移動 → 攝影機跟隨 → 地圖在腳下移動，箭頭固定畫面中心
+ * app.js — 主程式：狀態、導航流程、動畫迴圈（對齊 01.html 平滑邏輯）
  * ========================================================= */
 (function () {
   'use strict';
@@ -21,9 +15,11 @@
   const cam = new APP.Camera();
 
   const state = {
-    user: { x: 1750, y: 1450 },
-    marker: { x: 1750, y: 1450 },
-    arrowHeading: 0,
+    user: { x: 1500, y: 2500 },     // 真實位置
+    marker: { x: 1500, y: 2500 },   // 虛擬標記（等等我用的參考點）
+    displayPos: { x: 1500, y: 2500 }, // 畫面顯示用的平滑座標
+    arrowHeading: 0,                // 目前顯示的平滑方位角
+    userHeading: 0,                 // 感應器回報的實際方位角
     headingOffset: 0,
     stepCount: 0,
     sensitivity: cfg.step.sensitivity,
@@ -44,13 +40,25 @@
     cam: cam,
     sensors: S,
 
-    /* ---------- 定位 / 步進 ---------- */
+    /* ---------- 定位 / 步進（對齊 01.html 步幅與向量計算） ---------- */
     addStep: function () {
-      const mm = (state.stride / 100) * cfg.step.maxStrideMM;
-      const d = G.dir(state.arrowHeading);
-      state.user.x = G.clamp(state.user.x + d.x * mm, 0, cfg.map.width);
-      state.user.y = G.clamp(state.user.y + d.y * mm, 0, cfg.map.height);
       state.stepCount++;
+
+      // 讀取步幅設定，將 1-100 對應至 780mm 基準
+      const strideInput = Math.max(1, Math.min(100, state.stride));
+      const currentStrideMM = (strideInput / 100) * 780;
+
+      // 使用與 01.html 一致的三角函數計算前進方向
+      const rad = (-state.userHeading * Math.PI) / 180;
+      state.marker.x += Math.sin(rad) * currentStrideMM;
+      state.marker.y -= Math.cos(rad) * currentStrideMM;
+
+      // 限制在地圖邊界內
+      state.marker.x = G.clamp(state.marker.x, 0, cfg.map.width);
+      state.marker.y = G.clamp(state.marker.y, 0, cfg.map.height);
+
+      state.user.x = state.marker.x;
+      state.user.y = state.marker.y;
 
       this.updateProgress();
       cam.follow(state.user, 0.5);
@@ -60,6 +68,10 @@
     setPosition: function (x, y) {
       state.user.x = G.clamp(x, 0, cfg.map.width);
       state.user.y = G.clamp(y, 0, cfg.map.height);
+      state.marker.x = state.user.x;
+      state.marker.y = state.user.y;
+      state.displayPos.x = state.user.x;
+      state.displayPos.y = state.user.y;
       this.updateProgress();
       cam.jumpTo(state.user);
     },
@@ -83,6 +95,8 @@
       state.user.y = d.y;
       state.marker.x = d.x;
       state.marker.y = d.y;
+      state.displayPos.x = d.x;
+      state.displayPos.y = d.y;
       this.updateProgress();
       cam.jumpTo(state.user);
       return true;
@@ -98,11 +112,12 @@
       state.dest = { x: route.pts[route.pts.length - 1].x, y: route.pts[route.pts.length - 1].y };
       state.routeIndex = 0;
 
-      // 紅箭頭自動定位到起點
       state.user.x = state.start.x;
       state.user.y = state.start.y;
       state.marker.x = state.start.x;
       state.marker.y = state.start.y;
+      state.displayPos.x = state.start.x;
+      state.displayPos.y = state.start.y;
 
       state.phase = 'calibrating';
       cam.jumpTo(state.start);
@@ -121,7 +136,6 @@
       state.phase = 'idle';
     },
 
-    /* 方向校正：把「目前感應器朝向」對齊到「導航方位」 */
     calibrate: function () {
       const b = Nav.bearingToNext(state.user, state.route, state.routeIndex);
       if (b === null) return false;
@@ -133,12 +147,10 @@
       return true;
     },
 
-    /* 略過校正：保留現有偏移，直接開始導航 */
     skipCalibration: function () {
       state.phase = 'navigating';
     },
 
-    /* 校正偏差（度）：負 = 箭頭偏左，正 = 偏右 */
     deviation: function () {
       const b = Nav.bearingToNext(state.user, state.route, state.routeIndex);
       if (b === null) return null;
@@ -160,7 +172,6 @@
       }
     },
 
-    /* ---------- 視角 ---------- */
     recenter: function () {
       cam.jumpTo(state.user);
     },
@@ -173,7 +184,6 @@
     zoomBy: function (f) { cam.zoomBy(f); },
     rotateBy: function (d) { cam.rotateBy(d); },
 
-    /* ---------- 設定 ---------- */
     setSensitivity: function (v) {
       state.sensitivity = G.clamp(v, 1, 100);
       S.setSensitivity(state.sensitivity);
@@ -184,7 +194,7 @@
     },
 
     strideMM: function () {
-      return (state.stride / 100) * cfg.step.maxStrideMM;
+      return (state.stride / 100) * 780;
     },
 
     setSimulate: function (on) {
@@ -201,10 +211,12 @@
 
     resetAll: function () {
       this.clearRoute();
-      state.user.x = 1750;
-      state.user.y = 1450;
-      state.marker.x = 1750;
-      state.marker.y = 1450;
+      state.user.x = 1500;
+      state.user.y = 2500;
+      state.marker.x = 1500;
+      state.marker.y = 2500;
+      state.displayPos.x = 1500;
+      state.displayPos.y = 2500;
       state.stepCount = 0;
       state.headingOffset = 0;
       cam.jumpTo(state.user);
@@ -212,7 +224,6 @@
       if (APP.ui) APP.ui.syncStepCount(0);
     },
 
-    /* ---------- 地圖點選 ---------- */
     setPickMode: function (mode) {
       state.pickMode = state.pickMode === mode ? null : mode;
       return state.pickMode;
@@ -230,7 +241,6 @@
     updatePanelInset: function () {
       const panel = document.getElementById('panel');
       const open = panel.classList.contains('open');
-      // 只有手機的底部面板才會遮住地圖下半部；桌面的面板在左側，不需偏移
       const isBottomSheet = window.innerWidth < 760;
       cam.setInsetBottom(open && isBottomSheet ? panel.offsetHeight : 0);
     }
@@ -238,9 +248,6 @@
 
   APP.app = app;
 
-  /* =========================================================
-   * 尺寸 / 裝置像素比
-   * ========================================================= */
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
     const w = window.innerWidth;
@@ -259,21 +266,17 @@
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', function () { setTimeout(resize, 250); });
 
-  /* =========================================================
-   * 手勢
-   * ========================================================= */
   APP.attachGestures(canvas, cam, {
     onTap: function (x, y) { app.handleTap(x, y); }
   });
 
-  /* =========================================================
-   * 感應器回呼
-   * ========================================================= */
+  /* ---------- 感應器回呼 ---------- */
   S.onStep = function () { app.addStep(); };
   S.onLog = function (msg) { if (APP.ui) APP.ui.setSensorMsg(msg); };
+  S.onHeading = function (h) { state.userHeading = h; };
 
   /* =========================================================
-   * 動畫迴圈
+   * 動畫迴圈（導入 01.html 的 Lerp 平滑追隨邏輯）
    * ========================================================= */
   let last = 0;
 
@@ -281,37 +284,40 @@
     const dt = last ? Math.min(now - last, 100) : 16;
     last = now;
 
-    // 1. 方位角：感應器（或模擬）+ 校正偏移 → 平滑
-    const target = G.norm360(S.current() + state.headingOffset);
-    state.arrowHeading = G.lerpAngle(state.arrowHeading, target, Math.min(1, dt / 90));
+    // 1. 同步實際感應器方向
+    state.userHeading = S.current();
 
-    // 2. 攝影機跟隨（箭頭固定、地圖移動）
+    // 2. 採用 01.html 的平滑內插法 (Lerp) 追隨位置與角度，消除抖動
+    state.displayPos.x += (state.marker.x - state.displayPos.x) * 0.2;
+    state.displayPos.y += (state.marker.y - state.displayPos.y) * 0.2;
+
+    const targetHeading = G.norm360(state.userHeading + state.headingOffset);
+    let diff = targetHeading - state.arrowHeading;
+    if (diff > 180) diff -= 360;
+    if (diff < -180) diff += 360;
+    state.arrowHeading = G.norm360(state.arrowHeading + diff * 0.2);
+
+    // 3. 攝影機跟隨平滑位置
     cam.follow(state.user);
 
-    // 3. 進度 / 抵達判定
+    // 4. 進度 / 抵達判定
     if (state.route) app.updateProgress();
 
-    // 4. 繪圖
+    // 5. 繪圖
     R.frame(ctx, cam, state, now);
 
-    // 5. HUD
+    // 6. HUD
     if (APP.ui) APP.ui.updateHud(state);
 
     requestAnimationFrame(loop);
   }
 
-  /* =========================================================
-   * 啟動
-   * ========================================================= */
   resize();
   APP.ui.init(app);
   app.updatePanelInset();
   cam.jumpTo(state.user);
 
-  // 非 iOS 直接開始監聽感應器（iOS 一定要使用者手勢，仍要按按鈕）
   S.autoStart();
-
-  // 背景先建好導航網格，避免第一次規劃時卡頓
   setTimeout(function () { Nav.build(); }, 60);
 
   requestAnimationFrame(loop);
