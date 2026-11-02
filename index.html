@@ -13,6 +13,31 @@
 </head>
 <body>
 
+<!-- 早期錯誤攔截：任何 JS 錯誤直接顯示在畫面上，方便在手機上回報問題 -->
+<script>
+(function () {
+  var shown = 0;
+  function bar(text) {
+    if (shown > 2) return;
+    shown++;
+    var el = document.createElement('div');
+    el.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99998;background:#8a2230;color:#fff;' +
+      'font:12px/1.5 -apple-system,"Microsoft JhengHei",sans-serif;padding:8px 12px;max-height:38vh;overflow:auto;';
+    el.textContent = 'JS 錯誤（v4）：' + text;
+    document.body.appendChild(el);
+  }
+  window.addEventListener('error', function (e) {
+    if (!e || !e.message) return;
+    var where = e.filename ? ' @ ' + String(e.filename).split('/').pop() + ':' + e.lineno : '';
+    bar(e.message + where);
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e && e.reason;
+    bar('Promise 未處理：' + (r && r.message ? r.message : String(r)));
+  });
+})();
+</script>
+
 <!-- 地圖畫布：紅箭頭固定在畫面中央，移動的是地圖 -->
 <canvas id="mapCanvas"></canvas>
 
@@ -22,6 +47,8 @@
   <span class="chip"><b id="hudSteps">0</b> 步</span>
   <span class="chip">剩餘 <b id="hudDist">--</b></span>
   <span class="chip" id="hudPhase" data-phase="idle">待機</span>
+  <span class="chip" id="hudSim" style="display:none;color:#ffc857;border-color:rgba(255,200,87,0.5);">模擬朝向</span>
+  <span class="chip" id="buildTag" title="頁面版本（看不到 v4 就是讀到舊快取）">v4</span>
 </div>
 
 <!-- 方向校正提示條 -->
@@ -206,7 +233,7 @@
     if (!missing.length) missing.push('（模組都在，但 app.js 執行中出錯 → 請開瀏覽器 Console 看錯誤）');
 
     banner(
-      '<h3 style="color:#ff6b81;margin:0 0 14px;font-size:17px;">程式載入失敗</h3>' +
+      '<h3 style="color:#ff6b81;margin:0 0 14px;font-size:17px;">程式載入失敗（v4）</h3>' +
       '<p style="margin:0 0 6px;color:#8b98a8;font-size:13px;">以下檔案沒載入或沒執行：</p>' +
       '<p style="margin:0 0 18px;color:#ffaa00;font-weight:700;word-break:break-all;">' +
       missing.join('、') + '</p>' +
@@ -231,3 +258,4 @@
 
 </body>
 </html>
+
