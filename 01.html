@@ -1,248 +1,163 @@
 <!DOCTYPE html>
 <html lang="zh-HK">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3000x3000mm 導航測試（預設靈敏度60、步幅5）</title>
-    <style>
-        body { margin: 0; padding: 10px; font-family: sans-serif; background: #121212; color: #fff; text-align: center; }
-        .panel { background: #1e1e1e; padding: 10px; border-radius: 8px; margin: 10px auto; max-width: 400px; font-size: 14px; text-align: left; }
-        button, input { padding: 8px; font-size: 14px; background: #222; color: #fff; border: 1px solid #444; border-radius: 4px; margin-top: 5px; }
-        button { background: #0055ff; cursor: pointer; font-weight: bold; width: 100%; }
-        button.warning { background: #ff5500; }
-        button.success { background: #00aa55; }
-        button.test { background: #aa00ff; }
-        canvas { background: #181818; display: block; margin: 0 auto; border-radius: 8px; border: 2px solid #333; max-width: 100%; width: 350px; height: 350px; }
-        .row { display: flex; gap: 8px; }
-        .flex-center { display: flex; align-items: center; justify-content: space-between; margin-top: 5px; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e13">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>室內導航測試 · 4 房間 / 2 走廊</title>
+<link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-    <h3>3000x3000mm 流暢導航測試</h3>
-    
-    <div class="panel">
-        <button onclick="startAndroidSensor()">1. 點擊啟動感應器與計步</button>
-        <p id="debugMsg" style="font-size: 11px; color: #ff5555; margin: 5px 0 0 0;">狀態: 等待啟動</p>
+<!-- 地圖畫布：紅箭頭固定在畫面中央，移動的是地圖 -->
+<canvas id="mapCanvas"></canvas>
+
+<!-- 頂部狀態列 -->
+<div id="hud">
+  <span class="chip">朝向 <b class="cyan" id="hudHeading">0</b>°</span>
+  <span class="chip"><b id="hudSteps">0</b> 步</span>
+  <span class="chip">剩餘 <b id="hudDist">--</b></span>
+  <span class="chip" id="hudPhase" data-phase="idle">待機</span>
+</div>
+
+<!-- 方向校正提示條 -->
+<div id="calibBar">
+  <div class="calibLine">
+    <span>導航方位 <b id="calibBearing">--</b>°</span>
+    <span>箭頭 <b id="calibArrow">--</b>°</span>
+    <span>偏差 <b id="calibDev">--</b>°</span>
+  </div>
+  <div class="hint" id="calibHint">請將手機朝向導航方向，然後按「確認開始導航」</div>
+  <div class="row">
+    <button id="calibrateBtn" class="primary">確認開始導航</button>
+    <button id="skipCalibBtn">略過</button>
+  </div>
+</div>
+
+<!-- 右下浮動按鈕 -->
+<div id="fab">
+  <button id="recenterBtn" title="重設視角">◎</button>
+  <button id="panelToggle" title="開關控制面板">☰</button>
+</div>
+
+<div id="toast"></div>
+
+<!-- 控制面板 -->
+<div id="panel">
+  <div class="tabs">
+    <button class="tab active" data-tab="nav">導航</button>
+    <button class="tab" data-tab="pos">定位</button>
+    <button class="tab" data-tab="cfg">設定</button>
+  </div>
+
+  <!-- ============ 導航 ============ -->
+  <section class="pane active" data-pane="nav">
+    <div class="field">
+      <label>起點</label>
+      <select id="startSelect"></select>
+      <div class="row2">
+        <input type="number" id="startX" step="10" inputmode="numeric" placeholder="X (mm)">
+        <input type="number" id="startY" step="10" inputmode="numeric" placeholder="Y (mm)">
+      </div>
+      <button class="mini" id="pickStartBtn">在地圖上點選起點</button>
     </div>
 
-    <canvas id="mapCanvas" width="350" height="350"></canvas>
-
-    <div class="panel">
-        <div><strong>步數參數設定 (1-100)</strong></div>
-        <div class="flex-center">
-            <span>靈敏度閥值 (預設60):</span>
-            <input type="number" id="sensitivityInput" min="1" max="100" value="60" style="width: 70px; text-align: center;">
-        </div>
-        <div class="flex-center" style="margin-top: 5px;">
-            <span>步幅大小 (預設5):</span>
-            <input type="number" id="strideInput" min="1" max="100" value="5" style="width: 70px; text-align: center;">
-        </div>
-
-        <div style="margin-top: 8px;">
-            <button class="test" onclick="simulateStep()">模擬跨一步 (+步數)</button>
-        </div>
-        <div class="row" style="margin-top: 8px;">
-            <button class="warning" onclick="waitMarker()">等等我 (拉回標記)</button>
-            <button class="success" onclick="syncPositionAtMarker()">我已到標記位</button>
-        </div>
-        <div style="margin-top: 10px;">
-            <input type="text" id="deviceInput" placeholder="輸入牆上電掣 (如 SW-301)" style="width: 65%;">
-            <button onclick="calibrateByDevice()" style="width: 30%; display:inline-block;">校準</button>
-        </div>
-        <p style="margin: 8px 0 0 0; color: #aaa; font-size: 12px; text-align: center;">
-            朝向角度: <span id="heading" style="color: #00ffcc; font-weight: bold;">--</span>° | 步數: <span id="stepCount">0</span> 步
-        </p>
+    <div class="field">
+      <label>終點</label>
+      <select id="destSelect"></select>
+      <div class="row2">
+        <input type="number" id="destX" step="10" inputmode="numeric" placeholder="X (mm)">
+        <input type="number" id="destY" step="10" inputmode="numeric" placeholder="Y (mm)">
+      </div>
+      <button class="mini" id="pickDestBtn">在地圖上點選終點</button>
     </div>
 
-<script>
-    const canvas = document.getElementById('mapCanvas');
-    const ctx = canvas.getContext('2d');
+    <div class="row">
+      <button id="planBtn" class="primary">確定並開始導航</button>
+      <button id="clearBtn">清除</button>
+    </div>
 
-    const roomSize = 3000; 
-    const canvasSize = 350;
-    const padding = 25;
-    const drawAreaSize = canvasSize - (padding * 2);
+    <p class="hint" id="planHint">
+      選單可直接挑房間／電掣，或自行輸入 X / Y（單位 mm，地圖 8200 × 7000）。
+      確定後紅箭頭會自動移到起點，並用有方向的導航線帶你走到終點。
+    </p>
+  </section>
 
-    function mmToPx(mmX, mmY) {
-        let px = padding + (mmX / roomSize) * drawAreaSize;
-        let py = padding + (mmY / roomSize) * drawAreaSize;
-        return { x: px, y: py };
-    }
+  <!-- ============ 定位 ============ -->
+  <section class="pane" data-pane="pos">
+    <button id="sensorBtn" class="primary">1. 啟動感應器與計步</button>
+    <p class="hint" id="sensorMsg">狀態：未啟動</p>
 
-    const devices = {
-        'SW-301': { x: 1500, y: 0, name: '北牆 SW-301' },
-        'SW-302': { x: 3000, y: 1500, name: '東牆 SW-302' },
-        'SW-303': { x: 1500, y: 3000, name: '南牆 SW-303' },
-        'SW-304': { x: 0, y: 1500, name: '西牆 SW-304' }
-    };
+    <button id="stepBtn" class="test">模擬跨一步</button>
 
-    let userPos = { x: 1500, y: 2500 };   
-    let markerPos = { x: 1500, y: 2500 };   
-    let displayPos = { x: 1500, y: 2500 };  
-    
-    let userHeading = 0;              
-    let displayHeading = 0;           
-    let stepCount = 0;
-    let isRunning = false;
+    <div class="row">
+      <button id="markBtn" class="warn">等等我（標記＝目前）</button>
+      <button id="syncBtn" class="ok">我已到標記位</button>
+    </div>
 
-    function drawRoom() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    <div class="field" style="margin-top:14px;">
+      <label>牆上電掣校準</label>
+      <div class="row">
+        <input type="text" id="deviceInput" placeholder="SW-301">
+        <button id="deviceBtn" style="flex:0 0 72px;">校準</button>
+      </div>
+      <p class="hint">可用電掣：SW-301 ~ SW-305（見地圖上的橙點）</p>
+    </div>
+  </section>
 
-        let topLeft = mmToPx(0, 0);
-        let bottomRight = mmToPx(roomSize, roomSize);
-        ctx.strokeStyle = '#555';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
+  <!-- ============ 設定 ============ -->
+  <section class="pane" data-pane="cfg">
+    <div class="field">
+      <label>靈敏度閾值 <b id="sensVal">60</b>（越大越易觸發）</label>
+      <input type="range" id="sensitivityInput" min="1" max="100" value="60">
+    </div>
 
-        // 畫網格
-        ctx.strokeStyle = '#222';
-        ctx.lineWidth = 1;
-        for (let i = 1000; i < roomSize; i += 1000) {
-            let p1 = mmToPx(i, 0); let p2 = mmToPx(i, roomSize);
-            ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
-            let h1 = mmToPx(0, i); let h2 = mmToPx(roomSize, i);
-            ctx.beginPath(); ctx.moveTo(h1.x, h1.y); ctx.lineTo(h2.x, h2.y); ctx.stroke();
-        }
+    <div class="field">
+      <label>步幅 <b id="strideVal">5</b>　每步約 <span id="strideMM">39</span> mm</label>
+      <input type="range" id="strideInput" min="1" max="100" value="5">
+    </div>
 
-        // 畫電掣
-        for (let key in devices) {
-            let dev = devices[key];
-            let p = mmToPx(dev.x, dev.y);
-            ctx.fillStyle = '#ffaa00';
-            ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = '#888'; ctx.font = '10px sans-serif';
-            ctx.fillText(key, p.x + 6, p.y + 3);
-        }
+    <div class="field">
+      <label>
+        <input type="checkbox" id="simToggle"> 模擬朝向（沒有感應器時測試用）
+      </label>
+      <label style="margin-top:6px;">模擬方向 <b id="simVal">0</b>°</label>
+      <input type="range" id="simHeading" min="0" max="359" value="0">
+    </div>
 
-        // 真人位置 (藍點)
-        let uPx = mmToPx(userPos.x, userPos.y);
-        ctx.fillStyle = '#00ffcc';
-        ctx.beginPath(); ctx.arc(uPx.x, uPx.y, 6, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+    <div class="field">
+      <label><input type="checkbox" id="gridToggle" checked> 顯示 1 m 網格</label>
+    </div>
 
-        // 虛擬標記/箭頭 (紅箭頭)
-        let mPx = mmToPx(displayPos.x, displayPos.y);
-        ctx.save();
-        ctx.translate(mPx.x, mPx.y);
-        ctx.rotate((-displayHeading * Math.PI) / 180); 
-        ctx.fillStyle = '#ff3366';
-        ctx.beginPath();
-        ctx.moveTo(0, -12);
-        ctx.lineTo(-7, 8);
-        ctx.lineTo(7, 8);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-    }
+    <div class="field">
+      <label>視角</label>
+      <div class="btnGrid">
+        <button id="zoomOut">－</button>
+        <button id="zoomIn">＋</button>
+        <button id="rotL">↺</button>
+        <button id="rotR">↻</button>
+        <button id="resetViewBtn">重設</button>
+      </div>
+      <p class="hint">單指拖曳＝旋轉地圖，雙指＝同時旋轉＋縮放，滾輪＝縮放。地圖中心一直鎖在紅箭頭上，所以箭頭永遠在畫面正中。</p>
+    </div>
 
-    function animationLoop() {
-        displayPos.x += (markerPos.x - displayPos.x) * 0.2;
-        displayPos.y += (markerPos.y - displayPos.y) * 0.2;
+    <button id="resetBtn" class="warn">重置位置與導航</button>
+  </section>
+</div>
 
-        let diff = userHeading - displayHeading;
-        if (diff > 180) diff -= 360;
-        if (diff < -180) diff += 360;
-        displayHeading += diff * 0.2;
-
-        drawRoom();
-        requestAnimationFrame(animationLoop);
-    }
-
-    function startAndroidSensor() {
-        isRunning = true;
-        document.getElementById('debugMsg').innerText = "狀態: 流暢導航運行中...";
-        document.getElementById('debugMsg').style.color = "#00ffcc";
-
-        if ('ondeviceorientationabsolute' in window) {
-            window.addEventListener('deviceorientationabsolute', handleOrientation, true);
-        } else {
-            window.addEventListener('deviceorientation', handleOrientation, true);
-        }
-        
-        alert('已啟動流暢模式！');
-    }
-
-    function handleOrientation(event) {
-        let heading = event.alpha;
-        if (heading !== null) {
-            userHeading = heading;
-            document.getElementById('heading').innerText = Math.round(userHeading);
-        }
-    }
-
-    function addStepForward() {
-        stepCount++;
-        document.getElementById('stepCount').innerText = stepCount;
-
-        // 讀取步幅設定 (預設 5，基準值 780mm 進行等比縮放)
-        let strideInput = parseInt(document.getElementById('strideInput').value) || 5;
-        strideInput = Math.max(1, Math.min(100, strideInput));
-        let currentStrideMM = (strideInput / 100) * 780;
-
-        let rad = (-userHeading * Math.PI) / 180;
-        markerPos.x += Math.sin(rad) * currentStrideMM;
-        markerPos.y -= Math.cos(rad) * currentStrideMM; 
-
-        markerPos.x = Math.max(0, Math.min(roomSize, markerPos.x));
-        markerPos.y = Math.max(0, Math.min(roomSize, markerPos.y));
-    }
-
-    function simulateStep() {
-        if (!isRunning) {
-            alert('請先點擊上方按鈕啟動系統！');
-            return;
-        }
-        addStepForward();
-    }
-
-    function waitMarker() {
-        markerPos.x = userPos.x;
-        markerPos.y = userPos.y;
-    }
-
-    function syncPositionAtMarker() {
-        userPos.x = markerPos.x;
-        userPos.y = markerPos.y;
-    }
-
-    function calibrateByDevice() {
-        let code = document.getElementById('deviceInput').value.trim().toUpperCase();
-        if (devices[code]) {
-            userPos.x = devices[code].x;
-            userPos.y = devices[code].y;
-            markerPos.x = devices[code].x;
-            markerPos.y = devices[code].y;
-            displayPos.x = devices[code].x;
-            displayPos.y = devices[code].y;
-            alert(`成功校準至: ${devices[code].name}`);
-            document.getElementById('deviceInput').value = '';
-        } else {
-            alert('無效的電掣編號！請輸入 SW-301 至 SW-304');
-        }
-    }
-
-    let lastPeakTime = 0;
-    window.addEventListener('devicemotion', (event) => {
-        if (!isRunning) return;
-        let acc = event.accelerationIncludingGravity;
-        if (!acc) return;
-
-        let totalAcc = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
-        let now = Date.now();
-
-        let sensInput = parseInt(document.getElementById('sensitivityInput').value) || 60;
-        sensInput = Math.max(1, Math.min(100, sensInput));
-        let threshold = 13.5 - (sensInput / 100) * 3.5; 
-
-        if (totalAcc > threshold && (now - lastPeakTime) > 300) {
-            lastPeakTime = now;
-            addStepForward();
-        }
-    }, true);
-
-    animationLoop();
-</script>
+<!-- ============ 模組（傳統 script，file:// 也可直接開啟） ============ -->
+<script src="js/config.js"></script>
+<script src="js/geometry.js"></script>
+<script src="js/layout.js"></script>
+<script src="js/camera.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/render.js"></script>
+<script src="js/sensors.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
 
 </body>
 </html>
