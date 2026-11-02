@@ -2,65 +2,55 @@
 <html lang="zh-HK">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3000x3000mm 導航測試（Camera 置中版）</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3000x3000mm 導航測試（預設靈敏度60、步幅5）</title>
     <style>
-        body { 
-            margin: 0; padding: 0; font-family: sans-serif; 
-            background: #121212; color: #fff; text-align: center; 
-            overflow: hidden; height: 100vh; display: flex; flex-direction: column; justify-content: space-between;
-        }
-        .top-panel { background: #1e1e1e; padding: 8px; font-size: 14px; z-index: 10; border-bottom: 1px solid #333; }
-        .bottom-panel { background: #1e1e1e; padding: 10px; font-size: 13px; text-align: left; z-index: 10; max-height: 40vh; overflow-y: auto; border-top: 1px solid #333; }
-        button, input { padding: 8px; font-size: 14px; background: #222; color: #fff; border: 1px solid #444; border-radius: 4px; margin-top: 4px; }
+        body { margin: 0; padding: 10px; font-family: sans-serif; background: #121212; color: #fff; text-align: center; }
+        .panel { background: #1e1e1e; padding: 10px; border-radius: 8px; margin: 10px auto; max-width: 400px; font-size: 14px; text-align: left; }
+        button, input { padding: 8px; font-size: 14px; background: #222; color: #fff; border: 1px solid #444; border-radius: 4px; margin-top: 5px; }
         button { background: #0055ff; cursor: pointer; font-weight: bold; width: 100%; }
         button.warning { background: #ff5500; }
         button.success { background: #00aa55; }
         button.test { background: #aa00ff; }
-        
-        /* 畫布佔滿中間可用空間，讓紅箭頭永遠在正中央 */
-        .canvas-container { flex: 1; position: relative; overflow: hidden; background: #181818; }
-        canvas { display: block; width: 100%; height: 100%; }
-        
+        canvas { background: #181818; display: block; margin: 0 auto; border-radius: 8px; border: 2px solid #333; max-width: 100%; width: 350px; height: 350px; }
         .row { display: flex; gap: 8px; }
-        .flex-center { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+        .flex-center { display: flex; align-items: center; justify-content: space-between; margin-top: 5px; }
     </style>
 </head>
 <body>
 
-    <div class="top-panel">
+    <h3>3000x3000mm 流暢導航測試</h3>
+    
+    <div class="panel">
         <button onclick="startAndroidSensor()">1. 點擊啟動感應器與計步</button>
-        <p id="debugMsg" style="font-size: 11px; color: #ff5555; margin: 4px 0 0 0;">狀態: 等待啟動</p>
+        <p id="debugMsg" style="font-size: 11px; color: #ff5555; margin: 5px 0 0 0;">狀態: 等待啟動</p>
     </div>
 
-    <!-- 地圖畫布容器 -->
-    <div class="canvas-container">
-        <canvas id="mapCanvas"></canvas>
-    </div>
+    <canvas id="mapCanvas" width="350" height="350"></canvas>
 
-    <div class="bottom-panel">
+    <div class="panel">
         <div><strong>步數參數設定 (1-100)</strong></div>
         <div class="flex-center">
             <span>靈敏度閥值 (預設60):</span>
-            <input type="number" id="sensitivityInput" min="1" max="100" value="60" style="width: 60px; text-align: center;">
+            <input type="number" id="sensitivityInput" min="1" max="100" value="60" style="width: 70px; text-align: center;">
         </div>
-        <div class="flex-center">
+        <div class="flex-center" style="margin-top: 5px;">
             <span>步幅大小 (預設5):</span>
-            <input type="number" id="strideInput" min="1" max="100" value="5" style="width: 60px; text-align: center;">
+            <input type="number" id="strideInput" min="1" max="100" value="5" style="width: 70px; text-align: center;">
         </div>
 
-        <div style="margin-top: 4px;">
+        <div style="margin-top: 8px;">
             <button class="test" onclick="simulateStep()">模擬跨一步 (+步數)</button>
         </div>
-        <div class="row" style="margin-top: 4px;">
+        <div class="row" style="margin-top: 8px;">
             <button class="warning" onclick="waitMarker()">等等我 (拉回標記)</button>
             <button class="success" onclick="syncPositionAtMarker()">我已到標記位</button>
         </div>
-        <div style="margin-top: 4px;" class="row">
-            <input type="text" id="deviceInput" placeholder="牆上電掣 (如 SW-301)" style="flex: 1;">
-            <button onclick="calibrateByDevice()" style="flex: 0 0 70px; margin-top:4px;">校準</button>
+        <div style="margin-top: 10px;">
+            <input type="text" id="deviceInput" placeholder="輸入牆上電掣 (如 SW-301)" style="width: 65%;">
+            <button onclick="calibrateByDevice()" style="width: 30%; display:inline-block;">校準</button>
         </div>
-        <p style="margin: 4px 0 0 0; color: #aaa; font-size: 11px; text-align: center;">
+        <p style="margin: 8px 0 0 0; color: #aaa; font-size: 12px; text-align: center;">
             朝向角度: <span id="heading" style="color: #00ffcc; font-weight: bold;">--</span>° | 步數: <span id="stepCount">0</span> 步
         </p>
     </div>
@@ -69,7 +59,16 @@
     const canvas = document.getElementById('mapCanvas');
     const ctx = canvas.getContext('2d');
 
-    const roomSize = 3000; // 3000 x 3000 mm
+    const roomSize = 3000; 
+    const canvasSize = 350;
+    const padding = 25;
+    const drawAreaSize = canvasSize - (padding * 2);
+
+    function mmToPx(mmX, mmY) {
+        let px = padding + (mmX / roomSize) * drawAreaSize;
+        let py = padding + (mmY / roomSize) * drawAreaSize;
+        return { x: px, y: py };
+    }
 
     const devices = {
         'SW-301': { x: 1500, y: 0, name: '北牆 SW-301' },
@@ -80,102 +79,64 @@
 
     let userPos = { x: 1500, y: 2500 };   
     let markerPos = { x: 1500, y: 2500 };   
-    let displayPos = { x: 1500, y: 2500 };  // 用於平滑內插的顯示座標
+    let displayPos = { x: 1500, y: 2500 };  
     
     let userHeading = 0;              
     let displayHeading = 0;           
     let stepCount = 0;
     let isRunning = false;
 
-    // Camera 攝影機物件：負責將世界座標對應至螢幕，並確保紅箭頭永遠在畫面正中心
-    const cam = {
-        x: 1500,
-        y: 2500,
-        scale: 0.15, // 放大倍率 (px per mm)
-        follow(target) {
-            // 平滑跟隨目標位置 (Lerp)
-            this.x += (target.x - this.x) * 0.15;
-            this.y += (target.y - this.y) * 0.15;
-        },
-        // 將世界 mm 座標轉換為螢幕像素座標
-        worldToScreen(wx, wy) {
-            const vw = canvas.width / window.devicePixelRatio;
-            const vh = canvas.height / window.devicePixelRatio;
-            // 以 cam.x, cam.y 為畫面中心
-            const px = (vw / 2) + (wx - this.x) * this.scale;
-            const py = (vh / 2) + (wy - this.y) * this.scale;
-            return { x: px, y: py };
-        }
-    };
-
-    function resizeCanvas() {
-        const container = canvas.parentElement;
-        const dpr = window.devicePixelRatio || 1;
-        canvas.width = container.clientWidth * dpr;
-        canvas.height = container.clientHeight * dpr;
-        ctx.scale(dpr, dpr);
-    }
-    window.addEventListener('resize', resizeCanvas);
-    resizeCanvas();
-
     function drawRoom() {
-        const vw = canvas.width / window.devicePixelRatio;
-        const vh = canvas.height / window.devicePixelRatio;
-        ctx.clearRect(0, 0, vw, vh);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        ctx.save();
-
-        // 1. 繪製房間外框 (3000x3000mm)
-        let topLeft = cam.worldToScreen(0, 0);
-        let bottomRight = cam.worldToScreen(roomSize, roomSize);
+        let topLeft = mmToPx(0, 0);
+        let bottomRight = mmToPx(roomSize, roomSize);
         ctx.strokeStyle = '#555';
         ctx.lineWidth = 3;
         ctx.strokeRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
 
-        // 2. 畫網格 (每 1000mm 一格)
+        // 畫網格
         ctx.strokeStyle = '#222';
         ctx.lineWidth = 1;
         for (let i = 1000; i < roomSize; i += 1000) {
-            let p1 = cam.worldToScreen(i, 0); let p2 = cam.worldToScreen(i, roomSize);
+            let p1 = mmToPx(i, 0); let p2 = mmToPx(i, roomSize);
             ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
-            let h1 = cam.worldToScreen(0, i); let h2 = cam.worldToScreen(roomSize, i);
+            let h1 = mmToPx(0, i); let h2 = mmToPx(roomSize, i);
             ctx.beginPath(); ctx.moveTo(h1.x, h1.y); ctx.lineTo(h2.x, h2.y); ctx.stroke();
         }
 
-        // 3. 畫電掣
+        // 畫電掣
         for (let key in devices) {
             let dev = devices[key];
-            let p = cam.worldToScreen(dev.x, dev.y);
+            let p = mmToPx(dev.x, dev.y);
             ctx.fillStyle = '#ffaa00';
-            ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = '#aaa'; ctx.font = '11px sans-serif';
-            ctx.fillText(key, p.x + 8, p.y + 4);
+            ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#888'; ctx.font = '10px sans-serif';
+            ctx.fillText(key, p.x + 6, p.y + 3);
         }
 
-        ctx.restore();
+        // 真人位置 (藍點)
+        let uPx = mmToPx(userPos.x, userPos.y);
+        ctx.fillStyle = '#00ffcc';
+        ctx.beginPath(); ctx.arc(uPx.x, uPx.y, 6, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
 
-        // 4. 紅箭頭：永遠強制畫在畫布正中央！
-        const centerX = vw / 2;
-        const centerY = vh / 2;
-
+        // 虛擬標記/箭頭 (紅箭頭)
+        let mPx = mmToPx(displayPos.x, displayPos.y);
         ctx.save();
-        ctx.translate(centerX, centerY);
-        ctx.rotate((displayHeading * Math.PI) / 180); 
+        ctx.translate(mPx.x, mPx.y);
+        ctx.rotate((-displayHeading * Math.PI) / 180); 
         ctx.fillStyle = '#ff3366';
         ctx.beginPath();
-        ctx.moveTo(0, -16);
-        ctx.lineTo(-10, 12);
-        ctx.lineTo(10, 12);
+        ctx.moveTo(0, -12);
+        ctx.lineTo(-7, 8);
+        ctx.lineTo(7, 8);
         ctx.closePath();
         ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
         ctx.restore();
     }
 
     function animationLoop() {
-        // 平滑更新位置與角度
         displayPos.x += (markerPos.x - displayPos.x) * 0.2;
         displayPos.y += (markerPos.y - displayPos.y) * 0.2;
 
@@ -184,16 +145,13 @@
         if (diff < -180) diff += 360;
         displayHeading += diff * 0.2;
 
-        // 攝影機鎖定並平滑跟隨目前顯示座標
-        cam.follow(displayPos);
-
         drawRoom();
         requestAnimationFrame(animationLoop);
     }
 
     function startAndroidSensor() {
         isRunning = true;
-        document.getElementById('debugMsg').innerText = "狀態: 帶有 Camera 置中功能的導航運行中...";
+        document.getElementById('debugMsg').innerText = "狀態: 流暢導航運行中...";
         document.getElementById('debugMsg').style.color = "#00ffcc";
 
         if ('ondeviceorientationabsolute' in window) {
@@ -202,7 +160,7 @@
             window.addEventListener('deviceorientation', handleOrientation, true);
         }
         
-        alert('已啟動感應器！');
+        alert('已啟動流暢模式！');
     }
 
     function handleOrientation(event) {
@@ -217,11 +175,12 @@
         stepCount++;
         document.getElementById('stepCount').innerText = stepCount;
 
+        // 讀取步幅設定 (預設 5，基準值 780mm 進行等比縮放)
         let strideInput = parseInt(document.getElementById('strideInput').value) || 5;
         strideInput = Math.max(1, Math.min(100, strideInput));
         let currentStrideMM = (strideInput / 100) * 780;
 
-        let rad = (userHeading * Math.PI) / 180;
+        let rad = (-userHeading * Math.PI) / 180;
         markerPos.x += Math.sin(rad) * currentStrideMM;
         markerPos.y -= Math.cos(rad) * currentStrideMM; 
 
@@ -256,8 +215,6 @@
             markerPos.y = devices[code].y;
             displayPos.x = devices[code].x;
             displayPos.y = devices[code].y;
-            cam.x = devices[code].x;
-            cam.y = devices[code].y;
             alert(`成功校準至: ${devices[code].name}`);
             document.getElementById('deviceInput').value = '';
         } else {
