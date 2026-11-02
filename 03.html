@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3000x3000mm 導航與手動地圖校正版</title>
+    <style>
+        body { 
+            margin: 0; padding: 0; font-family: sans-serif; 
+            background: #121212; color: #fff; text-align: center; 
+            overflow: hidden; height: 100vh; display: flex; flex-direction: column; justify-content: space-between;
+        }
+        .top-panel { background: #1e1e1e; padding: 8px; font-size: 14px; z-index: 10; border-bottom: 1px solid #333; }
+        .bottom-panel { background: #1e1e1e; padding: 10px; font-size: 13px; text-align: left; z-index: 10; max-height: 48vh; overflow-y: auto; border-top: 1px solid #333; }
+        button, input, select { padding: 8px; font-size: 14px; background: #222; color: #fff; border: 1px solid #444; border-radius: 4px; margin-top: 4px; }
+        button { background: #0055ff; cursor: pointer; font-weight: bold; width: 100%; }
+        button.warning { background: #ff5500; }
+        button.success { background: #00aa55; }
+        button.test { background: #aa00ff; }
+        button.nav-btn { background: #2ea043; }
+        
+        .canvas-container { flex: 1; position: relative; overflow: hidden; background: #181818; touch-action: none; }
+        canvas { display: block; width: 100%; height: 100%; }
+        
+        .row { display: flex; gap: 8px; }
+        .flex-center { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+        .group-box { background: #262c36; padding: 6px; border-radius: 6px; margin-top: 6px; }
+    </style>
+</head>
+<body>
+
+    <div class="top-panel">
+        <button onclick="startAndroidSensor()">1. 點擊啟動感應器與計步</button>
+        <p id="debugMsg" style="font-size: 11px; color: #ff5555; margin: 4px 0 0 0;">狀態: 等待啟動</p>
+    </div>
+
+    <div class="canvas-container">
+        <canvas id="mapCanvas"></canvas>
+    </div>
+
+    <div class="bottom-panel">
+        <!-- 地圖校正區 -->
+        <div class="group-box" style="background: #1f2937; border: 1px solid #374151;">
+            <div style="font-weight: bold; margin-bottom: 2px; color: #fbbf24;">地圖方向手動校正</div>
+            <div class="flex-center">
+                <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 13px;">
+                    <input type="checkbox" id="manualGyroToggle" onchange="toggleManualGyro()" style="width: 18px; height: 18px;">
+                    暫時關閉陀螺儀 (手動旋轉地圖對齊現實)
+                </label>
+            </div>
+            <div class="row" style="margin-top: 4px;">
+                <button onclick="rotateManualMap(-15)" style="background: #374151; font-size: 12px;">↺ 左轉 15°</button>
+                <button onclick="rotateManualMap(15)" style="background: #374151; font-size: 12px;">↻ 右轉 15°</button>
+                <button onclick="resetManualRot()" style="background: #374151; font-size: 12px;">重置角度</button>
+            </div>
+            <div class="hint" style="font-size: 11px; color: #9ca3af; margin-top: 2px;">提示：勾選後可在畫面上單指拖曳旋轉地圖</div>
+        </div>
+
+        <!-- 導航規劃區 -->
+        <div class="group-box">
+            <div style="font-weight: bold; margin-bottom: 2px; color: #00ffcc;">導航規劃</div>
+            <div class="flex-center">
+                <span style="width: 40px;">起點:</span>
+                <select id="startSelect" style="flex: 1;">
+                    <option value="current">◎ 目前位置</option>
+                    <option value="SW-301">SW-301 (北牆)</option>
+                    <option value="SW-302">SW-302 (東牆)</option>
+                    <option value="SW-303">SW-303 (南牆)</option>
+                    <option value="SW-304">SW-304 (西牆)</option>
+                </select>
+            </div>
+            <div class="flex-center">
+                <span style="width: 40px;">終點:</span>
+                <select id="destSelect" style="flex: 1;">
+                    <option value="SW-301">SW-301 (北牆)</option>
+                    <option value="SW-302">SW-302 (東牆)</option>
+                    <option value="SW-303" selected>SW-303 (南牆)</option>
+                    <option value="SW-304">SW-304 (西牆)</option>
+                </select>
+            </div>
+            <button class="nav-btn" onclick="startNavigation()" style="margin-top: 6px;">確定並自動校正面向導航線</button>
+        </div>
+
+        <div style="margin-top: 6px;"><strong>步數與參數設定</strong></div>
+        <div class="flex-center">
+            <span>靈敏度 (60):</span>
+            <input type="number" id="sensitivityInput" min="1" max="100" value="60" style="width: 60px; text-align: center;">
+            <span>步幅 (5):</span>
+            <input type="number" id="strideInput" min="1" max="100" value="5" style="width: 60px; text-align: center;">
+        </div>
+
+        <div class="row" style="margin-top: 4px;">
+            <button class="test" onclick="simulateStep()">模擬跨一步</button>
+            <button class="warning" onclick="waitMarker()">等等我</button>
+            <button class="success" onclick="syncPositionAtMarker()">到標記位</button>
+        </div>
+
+        <p style="margin: 4px 0 0 0; color: #aaa; font-size: 11px; text-align: center;">
+            朝向: <span id="heading" style="color: #00ffcc; font-weight: bold;">--</span>° | 步數: <span id="stepCount">0</span> 步 | 剩餘距離: <span id="distLeft">--</span>
+        </p>
+    </div>
+
+<script>
+    const canvas = document.getElementById('mapCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const roomSize = 3000; 
+
+    const devices = {
+        'SW-301': { x: 1500, y: 0, name: '北牆 SW-301' },
+        'SW-302': { x: 3000, y: 1500, name: '東牆 SW-302' },
+        'SW-303': { x: 1500, y: 3000, name: '南牆 SW-303' },
+        'SW-304': { x: 0, y: 1500, name: '西牆 SW-304' }
+    };
+
+    let userPos = { x: 1500, y: 2500 };   
+    let markerPos = { x: 1500, y: 2500 };   
+    let displayPos = { x: 1500, y: 2500 };  
+    
+    let userHeading = 0;              
+    let displayHeading = 0;           
+    let headingOffset = 0;            
+    let stepCount = 0;
+    let isRunning = false;
+    let currentRoute = null;          
+
+    // 手動校正相關變數
+    let manualGyroOff = false;
+    let manualRotationOffset = 0; // 手動旋轉累積角度 (度)
+
+    const cam = {
+        x: 1500,
+        y: 2500,
+        scale: 0.35, 
+        follow(target) {
+            this.x += (target.x - this.x) * 0.15;
+            this.y += (target.y - this.y) * 0.15;
+        },
+        applyTransform(ctx, vw, vh) {
+            ctx.translate(vw / 2, vh / 2);
+            // 結合顯示轉向與手動校正旋轉角度
+            let totalRot = displayHeading + manualRotationOffset;
+            ctx.rotate((totalRot * Math.PI) / 180);
+            ctx.scale(this.scale, this.scale);
+            ctx.translate(-this.x, -this.y);
+        }
+    };
+
+    function resizeCanvas() {
+        const container = canvas.parentElement;
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = container.clientWidth * dpr;
+        canvas.height = container.clientHeight * dpr;
+        ctx.scale(dpr, dpr);
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // --- 單指拖曳旋轉 / 雙指縮放手勢 ---
+    const pointers = new Map();
+    let lastMouseX = 0, lastMouseY = 0;
+
+    canvas.addEventListener('pointerdown', e => {
+        canvas.setPointerCapture(e.pointerId);
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+    });
+
+    canvas.addEventListener('pointermove', e => {
+        if (!pointers.has(e.pointerId)) return;
+        const prev = pointers.get(e.pointerId);
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        // 如果開啟了「暫時關閉陀螺儀」，單指拖曳即可手動旋轉地圖
+        if (manualGyroOff && pointers.size === 1) {
+            const dx = e.clientX - prev.x;
+            manualRotationOffset += dx * 0.5; // 每像素轉 0.5 度
+        }
+    });
+
+    function clearPointer(e) {
+        pointers.delete(e.pointerId);
+        try { canvas.releasePointerCapture(e.pointerId); } catch(err) {}
+    }
+    canvas.addEventListener('pointerup', clearPointer);
+    canvas.addEventListener('pointercancel', clearPointer);
+
+    canvas.addEventListener('wheel', e => {
+        e.preventDefault();
+        cam.scale = Math.max(0.05, Math.min(2.0, cam.scale * Math.exp(-e.deltaY * 0.001)));
+    }, { passive: false });
+
+    // 手動校正介面控制函式
+    function toggleManualGyro() {
+        manualGyroOff = document.getElementById('manualGyroToggle').checked;
+        if (manualGyroOff) {
+            alert('已暫時關閉陀螺儀！您現在可以直接用手指在畫面上左右拖曳來手動旋轉地圖。');
+        } else {
+            alert('已恢復陀螺儀連動。');
+        }
+    }
+
+    function rotateManualMap(deg) {
+        manualRotationOffset += deg;
+    }
+
+    function resetManualRot() {
+        manualRotationOffset = 0;
+        alert('已重置手動旋轉角度');
+    }
+
+    function getDist(p1, p2) {
+        return Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    }
+
+    function getBearing(p1, p2) {
+        let rad = Math.atan2(p2.x - p1.x, p1.y - p2.y);
+        let deg = (rad * 180) / Math.PI;
+        return (deg + 360) % 360;
+    }
+
+    function startNavigation() {
+        const startVal = document.getElementById('startSelect').value;
+        const destVal = document.getElementById('destSelect').value;
+
+        let startPt = { x: userPos.x, y: userPos.y };
+        if (startVal !== 'current' && devices[startVal]) {
+            startPt = { x: devices[startVal].x, y: devices[startVal].y };
+            userPos.x = startPt.x; userPos.y = startPt.y;
+            markerPos.x = startPt.x; markerPos.y = startPt.y;
+        }
+
+        if (!devices[destVal]) {
+            alert('請選擇有效的終點！');
+            return;
+        }
+        let destPt = { x: devices[destVal].x, y: devices[destVal].y };
+
+        currentRoute = [startPt, destPt];
+
+        const targetBearing = getBearing(startPt, destPt);
+        headingOffset = (targetBearing - userHeading + 360) % 360;
+
+        alert(`導航已設定！自動校正方位：${Math.round(targetBearing)}°`);
+    }
+
+    function drawRoom() {
+        const vw = canvas.width / window.devicePixelRatio;
+        const vh = canvas.height / window.devicePixelRatio;
+        ctx.clearRect(0, 0, vw, vh);
+
+        ctx.save();
+        cam.applyTransform(ctx, vw, vh);
+
+        // 1. 房間外框
+        ctx.strokeStyle = '#666';
+        ctx.lineWidth = 15;
+        ctx.strokeRect(0, 0, roomSize, roomSize);
+
+        // 2. 網格
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 8;
+        for (let i = 1000; i < roomSize; i += 1000) {
+            ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, roomSize); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(roomSize, i); ctx.stroke();
+        }
+
+        // 3. 導航線
+        if (currentRoute && currentRoute.length >= 2) {
+            ctx.strokeStyle = 'rgba(0, 255, 170, 0.85)';
+            ctx.lineWidth = 30;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(currentRoute[0].x, currentRoute[0].y);
+            for (let i = 1; i < currentRoute.length; i++) {
+                ctx.lineTo(currentRoute[i].x, currentRoute[i].y);
+            }
+            ctx.stroke();
+
+            let p1 = currentRoute[0];
+            let p2 = currentRoute[currentRoute.length - 1];
+            let angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+            let midX = (p1.x + p2.x) / 2;
+            let midY = (p1.y + p2.y) / 2;
+
+            ctx.save();
+            ctx.translate(midX, midY);
+            ctx.rotate(angle + Math.PI / 2);
+            ctx.fillStyle = '#ffff00';
+            ctx.beginPath();
+            ctx.moveTo(0, -20);
+            ctx.lineTo(-15, 20);
+            ctx.lineTo(15, 20);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+
+            ctx.strokeStyle = '#ffd166';
+            ctx.lineWidth = 20;
+            ctx.beginPath();
+            ctx.arc(p2.x, p2.y, 120, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        // 4. 電掣點
+        for (let key in devices) {
+            let dev = devices[key];
+            ctx.fillStyle = '#ffaa00';
+            ctx.beginPath(); ctx.arc(dev.x, dev.y, 50, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 90px sans-serif';
+            ctx.fillText(key, dev.x + 70, dev.y + 30);
+        }
+
+        ctx.restore();
+
+        // 5. 紅箭頭 (永遠置中)
+        const centerX = vw / 2;
+        const centerY = vh / 2;
+
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.fillStyle = '#ff3366';
+        ctx.beginPath();
+        ctx.moveTo(0, -24);
+        ctx.lineTo(-16, 18);
+        ctx.lineTo(16, 18);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function animationLoop() {
+        displayPos.x += (markerPos.x - displayPos.x) * 0.2;
+        displayPos.y += (markerPos.y - displayPos.y) * 0.2;
+
+        // 如果手動關閉了陀螺儀，則凍結方向更新，完全聽從手動旋轉
+        if (!manualGyroOff) {
+            let calibratedHeading = (userHeading + headingOffset) % 360;
+            let diff = calibratedHeading - displayHeading;
+            if (diff > 180) diff -= 360;
+            if (diff < -180) diff += 360;
+            displayHeading += diff * 0.2;
+        }
+
+        cam.follow(displayPos);
+
+        if (currentRoute && currentRoute.length >= 2) {
+            let dest = currentRoute[currentRoute.length - 1];
+            let dist = getDist(displayPos, dest);
+            document.getElementById('distLeft').innerText = (dist / 1000).toFixed(2) + ' m';
+        }
+
+        drawRoom();
+        requestAnimationFrame(animationLoop);
+    }
+
+    function startAndroidSensor() {
+        isRunning = true;
+        document.getElementById('debugMsg').innerText = "狀態: 導航感應中...";
+        document.getElementById('debugMsg').style.color = '#00ffcc';
+
+        if ('ondeviceorientationabsolute' in window) {
+            window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+        } else {
+            window.addEventListener('deviceorientation', handleOrientation, true);
+        }
+        alert('已啟動感應器！');
+    }
+
+    function handleOrientation(event) {
+        let heading = event.alpha;
+        if (heading !== null) {
+            userHeading = heading;
+            document.getElementById('heading').innerText = Math.round((userHeading + headingOffset) % 360);
+        }
+    }
+
+    function addStepForward() {
+        stepCount++;
+        document.getElementById('stepCount').textContent = stepCount;
+
+        let strideInput = parseInt(document.getElementById('strideInput').value) || 5;
+        strideInput = Math.max(1, Math.min(100, strideInput));
+        let currentStrideMM = (strideInput / 100) * 780;
+
+        // 前進時，以當前畫面上實際呈現的方向（包含陀螺儀或手動校正後的角度）來決定前進向量
+        let currentFacing = (displayHeading + manualRotationOffset) % 360;
+        let rad = (currentFacing * Math.PI) / 180;
+        markerPos.x += Math.sin(rad) * currentStrideMM;
+        markerPos.y -= Math.cos(rad) * currentStrideMM; 
+
+        markerPos.x = Math.max(0, Math.min(roomSize, markerPos.x));
+        markerPos.y = Math.max(0, Math.min(roomSize, markerPos.y));
+    }
+
+    function simulateStep() {
+        addStepForward();
+    }
+
+    function waitMarker() {
+        markerPos.x = userPos.x;
+        markerPos.y = userPos.y;
+    }
+
+    function syncPositionAtMarker() {
+        userPos.x = markerPos.x;
+        userPos.y = markerPos.y;
+    }
+
+    let lastPeakTime = 0;
+    window.addEventListener('devicemotion', (event) => {
+        if (!isRunning || manualGyroOff) return; // 手動模式下也可以選擇是否接受震動計步
+        let acc = event.accelerationIncludingGravity;
+        if (!acc) return;
+
+        let totalAcc = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+        let now = Date.now();
+
+        let sensInput = parseInt(document.getElementById('sensitivityInput').value) || 60;
+        sensInput = Math.max(1, Math.min(100, sensInput));
+        let threshold = 13.5 - (sensInput / 100) * 3.5; 
+
+        if (totalAcc > threshold && (now - lastPeakTime) > 300) {
+            lastPeakTime = now;
+            addStepForward();
+        }
+    }, true);
+
+    animationLoop();
+</script>
+
+</body>
+</html>
