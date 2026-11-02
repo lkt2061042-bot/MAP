@@ -1,324 +1,291 @@
-/* =========================================================
- * app.js — 主程式：狀態、導航流程、動畫迴圈（對齊 01.html 平滑邏輯）
- * ========================================================= */
-(function () {
-  'use strict';
-  const G = APP.geometry;
-  const cfg = APP.config;
-  const L = APP.layout;
-  const Nav = APP.nav;
-  const R = APP.render;
-  const S = APP.sensors;
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3000x3000mm 導航測試（Camera 置中版）</title>
+    <style>
+        body { 
+            margin: 0; padding: 0; font-family: sans-serif; 
+            background: #121212; color: #fff; text-align: center; 
+            overflow: hidden; height: 100vh; display: flex; flex-direction: column; justify-content: space-between;
+        }
+        .top-panel { background: #1e1e1e; padding: 8px; font-size: 14px; z-index: 10; border-bottom: 1px solid #333; }
+        .bottom-panel { background: #1e1e1e; padding: 10px; font-size: 13px; text-align: left; z-index: 10; max-height: 40vh; overflow-y: auto; border-top: 1px solid #333; }
+        button, input { padding: 8px; font-size: 14px; background: #222; color: #fff; border: 1px solid #444; border-radius: 4px; margin-top: 4px; }
+        button { background: #0055ff; cursor: pointer; font-weight: bold; width: 100%; }
+        button.warning { background: #ff5500; }
+        button.success { background: #00aa55; }
+        button.test { background: #aa00ff; }
+        
+        /* 畫布佔滿中間可用空間，讓紅箭頭永遠在正中央 */
+        .canvas-container { flex: 1; position: relative; overflow: hidden; background: #181818; }
+        canvas { display: block; width: 100%; height: 100%; }
+        
+        .row { display: flex; gap: 8px; }
+        .flex-center { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+    </style>
+</head>
+<body>
 
-  const canvas = document.getElementById('mapCanvas');
-  const ctx = canvas.getContext('2d');
-  const cam = new APP.Camera();
+    <div class="top-panel">
+        <button onclick="startAndroidSensor()">1. 點擊啟動感應器與計步</button>
+        <p id="debugMsg" style="font-size: 11px; color: #ff5555; margin: 4px 0 0 0;">狀態: 等待啟動</p>
+    </div>
 
-  const state = {
-    user: { x: 1500, y: 2500 },     // 真實位置
-    marker: { x: 1500, y: 2500 },   // 虛擬標記（等等我用的參考點）
-    displayPos: { x: 1500, y: 2500 }, // 畫面顯示用的平滑座標
-    arrowHeading: 0,                // 目前顯示的平滑方位角
-    userHeading: 0,                 // 感應器回報的實際方位角
-    headingOffset: 0,
-    stepCount: 0,
-    sensitivity: cfg.step.sensitivity,
-    stride: cfg.step.stride,
-    route: null,
-    routeIndex: 0,
-    start: null,
-    dest: null,
-    distanceLeft: 0,
-    bearing: null,
-    phase: 'idle',          // idle | calibrating | navigating | arrived
-    pickMode: null,         // null | 'start' | 'dest'
-    showGrid: true
-  };
+    <!-- 地圖畫布容器 -->
+    <div class="canvas-container">
+        <canvas id="mapCanvas"></canvas>
+    </div>
 
-  const app = {
-    state: state,
-    cam: cam,
-    sensors: S,
+    <div class="bottom-panel">
+        <div><strong>步數參數設定 (1-100)</strong></div>
+        <div class="flex-center">
+            <span>靈敏度閥值 (預設60):</span>
+            <input type="number" id="sensitivityInput" min="1" max="100" value="60" style="width: 60px; text-align: center;">
+        </div>
+        <div class="flex-center">
+            <span>步幅大小 (預設5):</span>
+            <input type="number" id="strideInput" min="1" max="100" value="5" style="width: 60px; text-align: center;">
+        </div>
 
-    /* ---------- 定位 / 步進（對齊 01.html 步幅與向量計算） ---------- */
-    addStep: function () {
-      state.stepCount++;
+        <div style="margin-top: 4px;">
+            <button class="test" onclick="simulateStep()">模擬跨一步 (+步數)</button>
+        </div>
+        <div class="row" style="margin-top: 4px;">
+            <button class="warning" onclick="waitMarker()">等等我 (拉回標記)</button>
+            <button class="success" onclick="syncPositionAtMarker()">我已到標記位</button>
+        </div>
+        <div style="margin-top: 4px;" class="row">
+            <input type="text" id="deviceInput" placeholder="牆上電掣 (如 SW-301)" style="flex: 1;">
+            <button onclick="calibrateByDevice()" style="flex: 0 0 70px; margin-top:4px;">校準</button>
+        </div>
+        <p style="margin: 4px 0 0 0; color: #aaa; font-size: 11px; text-align: center;">
+            朝向角度: <span id="heading" style="color: #00ffcc; font-weight: bold;">--</span>° | 步數: <span id="stepCount">0</span> 步
+        </p>
+    </div>
 
-      // 讀取步幅設定，將 1-100 對應至 780mm 基準
-      const strideInput = Math.max(1, Math.min(100, state.stride));
-      const currentStrideMM = (strideInput / 100) * 780;
+<script>
+    const canvas = document.getElementById('mapCanvas');
+    const ctx = canvas.getContext('2d');
 
-      // 使用與 01.html 一致的三角函數計算前進方向
-      const rad = (-state.userHeading * Math.PI) / 180;
-      state.marker.x += Math.sin(rad) * currentStrideMM;
-      state.marker.y -= Math.cos(rad) * currentStrideMM;
+    const roomSize = 3000; // 3000 x 3000 mm
 
-      // 限制在地圖邊界內
-      state.marker.x = G.clamp(state.marker.x, 0, cfg.map.width);
-      state.marker.y = G.clamp(state.marker.y, 0, cfg.map.height);
+    const devices = {
+        'SW-301': { x: 1500, y: 0, name: '北牆 SW-301' },
+        'SW-302': { x: 3000, y: 1500, name: '東牆 SW-302' },
+        'SW-303': { x: 1500, y: 3000, name: '南牆 SW-303' },
+        'SW-304': { x: 0, y: 1500, name: '西牆 SW-304' }
+    };
 
-      state.user.x = state.marker.x;
-      state.user.y = state.marker.y;
+    let userPos = { x: 1500, y: 2500 };   
+    let markerPos = { x: 1500, y: 2500 };   
+    let displayPos = { x: 1500, y: 2500 };  // 用於平滑內插的顯示座標
+    
+    let userHeading = 0;              
+    let displayHeading = 0;           
+    let stepCount = 0;
+    let isRunning = false;
 
-      this.updateProgress();
-      cam.follow(state.user, 0.5);
-      if (APP.ui) APP.ui.syncStepCount(state.stepCount);
-    },
+    // Camera 攝影機物件：負責將世界座標對應至螢幕，並確保紅箭頭永遠在畫面正中心
+    const cam = {
+        x: 1500,
+        y: 2500,
+        scale: 0.15, // 放大倍率 (px per mm)
+        follow(target) {
+            // 平滑跟隨目標位置 (Lerp)
+            this.x += (target.x - this.x) * 0.15;
+            this.y += (target.y - this.y) * 0.15;
+        },
+        // 將世界 mm 座標轉換為螢幕像素座標
+        worldToScreen(wx, wy) {
+            const vw = canvas.width / window.devicePixelRatio;
+            const vh = canvas.height / window.devicePixelRatio;
+            // 以 cam.x, cam.y 為畫面中心
+            const px = (vw / 2) + (wx - this.x) * this.scale;
+            const py = (vh / 2) + (wy - this.y) * this.scale;
+            return { x: px, y: py };
+        }
+    };
 
-    setPosition: function (x, y) {
-      state.user.x = G.clamp(x, 0, cfg.map.width);
-      state.user.y = G.clamp(y, 0, cfg.map.height);
-      state.marker.x = state.user.x;
-      state.marker.y = state.user.y;
-      state.displayPos.x = state.user.x;
-      state.displayPos.y = state.user.y;
-      this.updateProgress();
-      cam.jumpTo(state.user);
-    },
-
-    moveMarkerToUser: function () {
-      state.marker.x = state.user.x;
-      state.marker.y = state.user.y;
-    },
-
-    moveUserToMarker: function () {
-      state.user.x = state.marker.x;
-      state.user.y = state.marker.y;
-      this.updateProgress();
-      cam.jumpTo(state.user);
-    },
-
-    calibrateByDevice: function (code) {
-      const d = L.devices[code];
-      if (!d) return false;
-      state.user.x = d.x;
-      state.user.y = d.y;
-      state.marker.x = d.x;
-      state.marker.y = d.y;
-      state.displayPos.x = d.x;
-      state.displayPos.y = d.y;
-      this.updateProgress();
-      cam.jumpTo(state.user);
-      return true;
-    },
-
-    /* ---------- 導航規劃 ---------- */
-    plan: function (start, dest) {
-      const route = Nav.findRoute(start, dest);
-      if (!route) return { ok: false, msg: '找不到路線：起點或終點在牆內／不連通' };
-
-      state.route = route;
-      state.start = { x: route.pts[0].x, y: route.pts[0].y };
-      state.dest = { x: route.pts[route.pts.length - 1].x, y: route.pts[route.pts.length - 1].y };
-      state.routeIndex = 0;
-
-      state.user.x = state.start.x;
-      state.user.y = state.start.y;
-      state.marker.x = state.start.x;
-      state.marker.y = state.start.y;
-      state.displayPos.x = state.start.x;
-      state.displayPos.y = state.start.y;
-
-      state.phase = 'calibrating';
-      cam.jumpTo(state.start);
-      this.updateProgress();
-
-      return { ok: true, route: route };
-    },
-
-    clearRoute: function () {
-      state.route = null;
-      state.routeIndex = 0;
-      state.start = null;
-      state.dest = null;
-      state.distanceLeft = 0;
-      state.bearing = null;
-      state.phase = 'idle';
-    },
-
-    calibrate: function () {
-      const b = Nav.bearingToNext(state.user, state.route, state.routeIndex);
-      if (b === null) return false;
-      const raw = S.current();
-      state.headingOffset = G.norm360(b - raw);
-      state.arrowHeading = b;
-      state.bearing = b;
-      state.phase = 'navigating';
-      return true;
-    },
-
-    skipCalibration: function () {
-      state.phase = 'navigating';
-    },
-
-    deviation: function () {
-      const b = Nav.bearingToNext(state.user, state.route, state.routeIndex);
-      if (b === null) return null;
-      return G.norm180(b - state.arrowHeading);
-    },
-
-    bearingToNext: function () {
-      return Nav.bearingToNext(state.user, state.route, state.routeIndex);
-    },
-
-    updateProgress: function () {
-      if (!state.route) { state.distanceLeft = 0; state.bearing = null; return; }
-      state.routeIndex = Nav.nextIndex(state.user, state.route, state.routeIndex);
-      state.distanceLeft = Nav.remainingDistance(state.user, state.route, state.routeIndex);
-      state.bearing = Nav.bearingToNext(state.user, state.route, state.routeIndex) || state.bearing;
-
-      if (state.distanceLeft < cfg.nav.arriveRadius && state.phase === 'navigating') {
-        state.phase = 'arrived';
-      }
-    },
-
-    recenter: function () {
-      cam.jumpTo(state.user);
-    },
-
-    resetView: function () {
-      cam.resetView();
-      cam.jumpTo(state.user);
-    },
-
-    zoomBy: function (f) { cam.zoomBy(f); },
-    rotateBy: function (d) { cam.rotateBy(d); },
-
-    setSensitivity: function (v) {
-      state.sensitivity = G.clamp(v, 1, 100);
-      S.setSensitivity(state.sensitivity);
-    },
-
-    setStride: function (v) {
-      state.stride = G.clamp(v, 1, 100);
-    },
-
-    strideMM: function () {
-      return (state.stride / 100) * 780;
-    },
-
-    setSimulate: function (on) {
-      S.simulate = !!on;
-    },
-
-    setSimHeading: function (deg) {
-      S.simulateHeading = G.norm360(deg);
-    },
-
-    setGrid: function (on) {
-      state.showGrid = !!on;
-    },
-
-    resetAll: function () {
-      this.clearRoute();
-      state.user.x = 1500;
-      state.user.y = 2500;
-      state.marker.x = 1500;
-      state.marker.y = 2500;
-      state.displayPos.x = 1500;
-      state.displayPos.y = 2500;
-      state.stepCount = 0;
-      state.headingOffset = 0;
-      cam.jumpTo(state.user);
-      cam.resetView();
-      if (APP.ui) APP.ui.syncStepCount(0);
-    },
-
-    setPickMode: function (mode) {
-      state.pickMode = state.pickMode === mode ? null : mode;
-      return state.pickMode;
-    },
-
-    handleTap: function (screenX, screenY) {
-      if (!state.pickMode) return;
-      const w = cam.screenToWorld({ x: screenX, y: screenY });
-      if (w.x < 0 || w.y < 0 || w.x > cfg.map.width || w.y > cfg.map.height) return;
-      const mode = state.pickMode;
-      state.pickMode = null;
-      if (APP.ui && APP.ui.handlePick) APP.ui.handlePick(mode, w);
-    },
-
-    updatePanelInset: function () {
-      const panel = document.getElementById('panel');
-      const open = panel.classList.contains('open');
-      const isBottomSheet = window.innerWidth < 760;
-      cam.setInsetBottom(open && isBottomSheet ? panel.offsetHeight : 0);
+    function resizeCanvas() {
+        const container = canvas.parentElement;
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = container.clientWidth * dpr;
+        canvas.height = container.clientHeight * dpr;
+        ctx.scale(dpr, dpr);
     }
-  };
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
 
-  APP.app = app;
+    function drawRoom() {
+        const vw = canvas.width / window.devicePixelRatio;
+        const vh = canvas.height / window.devicePixelRatio;
+        ctx.clearRect(0, 0, vw, vh);
 
-  function resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+        ctx.save();
 
-    cam.dpr = dpr;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
-    canvas.style.width = w + 'px';
-    canvas.style.height = h + 'px';
+        // 1. 繪製房間外框 (3000x3000mm)
+        let topLeft = cam.worldToScreen(0, 0);
+        let bottomRight = cam.worldToScreen(roomSize, roomSize);
+        ctx.strokeStyle = '#555';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
 
-    cam.resize(w, h);
-    app.updatePanelInset();
-  }
+        // 2. 畫網格 (每 1000mm 一格)
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = 1;
+        for (let i = 1000; i < roomSize; i += 1000) {
+            let p1 = cam.worldToScreen(i, 0); let p2 = cam.worldToScreen(i, roomSize);
+            ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+            let h1 = cam.worldToScreen(0, i); let h2 = cam.worldToScreen(roomSize, i);
+            ctx.beginPath(); ctx.moveTo(h1.x, h1.y); ctx.lineTo(h2.x, h2.y); ctx.stroke();
+        }
 
-  window.addEventListener('resize', resize);
-  window.addEventListener('orientationchange', function () { setTimeout(resize, 250); });
+        // 3. 畫電掣
+        for (let key in devices) {
+            let dev = devices[key];
+            let p = cam.worldToScreen(dev.x, dev.y);
+            ctx.fillStyle = '#ffaa00';
+            ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#aaa'; ctx.font = '11px sans-serif';
+            ctx.fillText(key, p.x + 8, p.y + 4);
+        }
 
-  APP.attachGestures(canvas, cam, {
-    onTap: function (x, y) { app.handleTap(x, y); }
-  });
+        ctx.restore();
 
-  /* ---------- 感應器回呼 ---------- */
-  S.onStep = function () { app.addStep(); };
-  S.onLog = function (msg) { if (APP.ui) APP.ui.setSensorMsg(msg); };
-  S.onHeading = function (h) { state.userHeading = h; };
+        // 4. 紅箭頭：永遠強制畫在畫布正中央！
+        const centerX = vw / 2;
+        const centerY = vh / 2;
 
-  /* =========================================================
-   * 動畫迴圈（導入 01.html 的 Lerp 平滑追隨邏輯）
-   * ========================================================= */
-  let last = 0;
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.rotate((displayHeading * Math.PI) / 180); 
+        ctx.fillStyle = '#ff3366';
+        ctx.beginPath();
+        ctx.moveTo(0, -16);
+        ctx.lineTo(-10, 12);
+        ctx.lineTo(10, 12);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
+    }
 
-  function loop(now) {
-    const dt = last ? Math.min(now - last, 100) : 16;
-    last = now;
+    function animationLoop() {
+        // 平滑更新位置與角度
+        displayPos.x += (markerPos.x - displayPos.x) * 0.2;
+        displayPos.y += (markerPos.y - displayPos.y) * 0.2;
 
-    // 1. 同步實際感應器方向
-    state.userHeading = S.current();
+        let diff = userHeading - displayHeading;
+        if (diff > 180) diff -= 360;
+        if (diff < -180) diff += 360;
+        displayHeading += diff * 0.2;
 
-    // 2. 採用 01.html 的平滑內插法 (Lerp) 追隨位置與角度，消除抖動
-    state.displayPos.x += (state.marker.x - state.displayPos.x) * 0.2;
-    state.displayPos.y += (state.marker.y - state.displayPos.y) * 0.2;
+        // 攝影機鎖定並平滑跟隨目前顯示座標
+        cam.follow(displayPos);
 
-    const targetHeading = G.norm360(state.userHeading + state.headingOffset);
-    let diff = targetHeading - state.arrowHeading;
-    if (diff > 180) diff -= 360;
-    if (diff < -180) diff += 360;
-    state.arrowHeading = G.norm360(state.arrowHeading + diff * 0.2);
+        drawRoom();
+        requestAnimationFrame(animationLoop);
+    }
 
-    // 3. 攝影機跟隨平滑位置
-    cam.follow(state.user);
+    function startAndroidSensor() {
+        isRunning = true;
+        document.getElementById('debugMsg').innerText = "狀態: 帶有 Camera 置中功能的導航運行中...";
+        document.getElementById('debugMsg').style.color = "#00ffcc";
 
-    // 4. 進度 / 抵達判定
-    if (state.route) app.updateProgress();
+        if ('ondeviceorientationabsolute' in window) {
+            window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+        } else {
+            window.addEventListener('deviceorientation', handleOrientation, true);
+        }
+        
+        alert('已啟動感應器！');
+    }
 
-    // 5. 繪圖
-    R.frame(ctx, cam, state, now);
+    function handleOrientation(event) {
+        let heading = event.alpha;
+        if (heading !== null) {
+            userHeading = heading;
+            document.getElementById('heading').innerText = Math.round(userHeading);
+        }
+    }
 
-    // 6. HUD
-    if (APP.ui) APP.ui.updateHud(state);
+    function addStepForward() {
+        stepCount++;
+        document.getElementById('stepCount').innerText = stepCount;
 
-    requestAnimationFrame(loop);
-  }
+        let strideInput = parseInt(document.getElementById('strideInput').value) || 5;
+        strideInput = Math.max(1, Math.min(100, strideInput));
+        let currentStrideMM = (strideInput / 100) * 780;
 
-  resize();
-  APP.ui.init(app);
-  app.updatePanelInset();
-  cam.jumpTo(state.user);
+        let rad = (userHeading * Math.PI) / 180;
+        markerPos.x += Math.sin(rad) * currentStrideMM;
+        markerPos.y -= Math.cos(rad) * currentStrideMM; 
 
-  S.autoStart();
-  setTimeout(function () { Nav.build(); }, 60);
+        markerPos.x = Math.max(0, Math.min(roomSize, markerPos.x));
+        markerPos.y = Math.max(0, Math.min(roomSize, markerPos.y));
+    }
 
-  requestAnimationFrame(loop);
-})();
+    function simulateStep() {
+        if (!isRunning) {
+            alert('請先點擊上方按鈕啟動系統！');
+            return;
+        }
+        addStepForward();
+    }
+
+    function waitMarker() {
+        markerPos.x = userPos.x;
+        markerPos.y = userPos.y;
+    }
+
+    function syncPositionAtMarker() {
+        userPos.x = markerPos.x;
+        userPos.y = markerPos.y;
+    }
+
+    function calibrateByDevice() {
+        let code = document.getElementById('deviceInput').value.trim().toUpperCase();
+        if (devices[code]) {
+            userPos.x = devices[code].x;
+            userPos.y = devices[code].y;
+            markerPos.x = devices[code].x;
+            markerPos.y = devices[code].y;
+            displayPos.x = devices[code].x;
+            displayPos.y = devices[code].y;
+            cam.x = devices[code].x;
+            cam.y = devices[code].y;
+            alert(`成功校準至: ${devices[code].name}`);
+            document.getElementById('deviceInput').value = '';
+        } else {
+            alert('無效的電掣編號！請輸入 SW-301 至 SW-304');
+        }
+    }
+
+    let lastPeakTime = 0;
+    window.addEventListener('devicemotion', (event) => {
+        if (!isRunning) return;
+        let acc = event.accelerationIncludingGravity;
+        if (!acc) return;
+
+        let totalAcc = Math.sqrt(acc.x * acc.x + acc.y * acc.y + acc.z * acc.z);
+        let now = Date.now();
+
+        let sensInput = parseInt(document.getElementById('sensitivityInput').value) || 60;
+        sensInput = Math.max(1, Math.min(100, sensInput));
+        let threshold = 13.5 - (sensInput / 100) * 3.5; 
+
+        if (totalAcc > threshold && (now - lastPeakTime) > 300) {
+            lastPeakTime = now;
+            addStepForward();
+        }
+    }, true);
+
+    animationLoop();
+</script>
+
+</body>
+</html>
