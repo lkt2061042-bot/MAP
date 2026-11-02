@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3000x3000mm 導航測試（優化縮放與置中版）</title>
+    <title>3000x3000mm 導航測試（雙指縮放旋轉、陀螺儀箭頭跟隨版）</title>
     <style>
         body { 
             margin: 0; padding: 0; font-family: sans-serif; 
@@ -18,7 +18,7 @@
         button.success { background: #00aa55; }
         button.test { background: #aa00ff; }
         
-        .canvas-container { flex: 1; position: relative; overflow: hidden; background: #181818; }
+        .canvas-container { flex: 1; position: relative; overflow: hidden; background: #181818; touch-action: none; }
         canvas { display: block; width: 100%; height: 100%; }
         
         .row { display: flex; gap: 8px; }
@@ -67,7 +67,7 @@
     const canvas = document.getElementById('mapCanvas');
     const ctx = canvas.getContext('2d');
 
-    const roomSize = 3000; // 3000 x 3000 mm
+    const roomSize = 3000; 
 
     const devices = {
         'SW-301': { x: 1500, y: 0, name: '北牆 SW-301' },
@@ -85,18 +85,20 @@
     let stepCount = 0;
     let isRunning = false;
 
-    // Camera 攝影機系統：大幅提升預設 scale，確保地圖足夠清晰放大
+    // Camera 攝影機系統：支援手動雙指縮放與旋轉，平時位置鎖定在 displayPos
     const cam = {
         x: 1500,
         y: 2500,
-        scale: 0.35, // 放大倍率從 0.15 提升至 0.35，讓地圖不再過小
+        scale: 0.35, 
+        rot: 0, // 手動旋轉角度
         follow(target) {
+            // 平滑跟隨使用者位置，平時不亂動
             this.x += (target.x - this.x) * 0.15;
             this.y += (target.y - this.y) * 0.15;
         },
         applyTransform(ctx, vw, vh) {
             ctx.translate(vw / 2, vh / 2);
-            ctx.rotate((-displayHeading * Math.PI) / 180);
+            ctx.rotate(this.rot); // 套用手動旋轉
             ctx.scale(this.scale, this.scale);
             ctx.translate(-this.x, -this.y);
         }
@@ -111,6 +113,55 @@
     }
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
+
+    // --- 雙指縮放與旋轉手勢處理 ---
+    const pointers = new Map();
+    let startDist = 0;
+    let startAngle = 0;
+    let baseScale = cam.scale;
+    let baseRot = cam.rot;
+
+    canvas.addEventListener('pointerdown', e => {
+        canvas.setPointerCapture(e.pointerId);
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pointers.size === 2) {
+            const pts = Array.from(pointers.values());
+            startDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+            startAngle = Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x);
+            baseScale = cam.scale;
+            baseRot = cam.rot;
+        }
+    });
+
+    canvas.addEventListener('pointermove', e => {
+        if (!pointers.has(e.pointerId)) return;
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (pointers.size === 2) {
+            const pts = Array.from(pointers.values());
+            const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+            const angle = Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x);
+
+            // 雙指縮放
+            cam.scale = Math.max(0.05, Math.min(2.0, baseScale * (dist / startDist)));
+            // 雙指旋轉
+            cam.rot = baseRot + (angle - startAngle);
+        }
+    });
+
+    function clearPointer(e) {
+        pointers.delete(e.pointerId);
+        try { canvas.releasePointerCapture(e.pointerId); } catch(err) {}
+    }
+    canvas.addEventListener('pointerup', clearPointer);
+    canvas.addEventListener('pointercancel', clearPointer);
+
+    // 滾輪縮放（電腦端支援）
+    canvas.addEventListener('wheel', e => {
+        e.preventDefault();
+        cam.scale = Math.max(0.05, Math.min(2.0, cam.scale * Math.exp(-e.deltaY * 0.001)));
+    }, { passive: false });
+
 
     function drawRoom() {
         const vw = canvas.width / window.devicePixelRatio;
@@ -144,12 +195,15 @@
 
         ctx.restore();
 
-        // 4. 紅箭頭：永遠精準固定在畫面正中央
+        // 4. 紅箭頭：固定在畫面正中央，並隨著手機陀螺儀（displayHeading）轉動
         const centerX = vw / 2;
         const centerY = vh / 2;
 
         ctx.save();
         ctx.translate(centerX, centerY);
+        // 陀螺儀轉動時，只有紅箭頭跟著轉，Camera 鏡頭本身保持靜止不動
+        ctx.rotate((displayHeading * Math.PI) / 180);
+
         ctx.fillStyle = '#ff3366';
         ctx.beginPath();
         ctx.moveTo(0, -24);
@@ -172,6 +226,7 @@
         if (diff < -180) diff += 360;
         displayHeading += diff * 0.2;
 
+        // 只有走路移動時 Camera 才跟隨平滑位置，陀螺儀轉動不影響 Camera 位置
         cam.follow(displayPos);
 
         drawRoom();
@@ -208,6 +263,7 @@
         strideInput = Math.max(1, Math.min(100, strideInput));
         let currentStrideMM = (strideInput / 100) * 780;
 
+        // 根據陀螺儀角度計算前進步數方向
         let rad = (userHeading * Math.PI) / 180;
         markerPos.x += Math.sin(rad) * currentStrideMM;
         markerPos.y -= Math.cos(rad) * currentStrideMM; 
