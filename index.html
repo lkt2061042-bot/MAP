@@ -1,261 +1,324 @@
-<!DOCTYPE html>
-<html lang="zh-HK">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#0b0e13">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>室內導航測試 · 4 房間 / 2 走廊</title>
-<!-- 所有檔案都放在同一層，路徑一律用相對檔名 -->
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
-
-<!-- 早期錯誤攔截：任何 JS 錯誤直接顯示在畫面上，方便在手機上回報問題 -->
-<script>
+/* =========================================================
+ * app.js — 主程式：狀態、導航流程、動畫迴圈（對齊 01.html 平滑邏輯）
+ * ========================================================= */
 (function () {
-  var shown = 0;
-  function bar(text) {
-    if (shown > 2) return;
-    shown++;
-    var el = document.createElement('div');
-    el.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99998;background:#8a2230;color:#fff;' +
-      'font:12px/1.5 -apple-system,"Microsoft JhengHei",sans-serif;padding:8px 12px;max-height:38vh;overflow:auto;';
-    el.textContent = 'JS 錯誤（v4）：' + text;
-    document.body.appendChild(el);
-  }
-  window.addEventListener('error', function (e) {
-    if (!e || !e.message) return;
-    var where = e.filename ? ' @ ' + String(e.filename).split('/').pop() + ':' + e.lineno : '';
-    bar(e.message + where);
-  });
-  window.addEventListener('unhandledrejection', function (e) {
-    var r = e && e.reason;
-    bar('Promise 未處理：' + (r && r.message ? r.message : String(r)));
-  });
-})();
-</script>
+  'use strict';
+  const G = APP.geometry;
+  const cfg = APP.config;
+  const L = APP.layout;
+  const Nav = APP.nav;
+  const R = APP.render;
+  const S = APP.sensors;
 
-<!-- 地圖畫布：紅箭頭固定在畫面中央，移動的是地圖 -->
-<canvas id="mapCanvas"></canvas>
+  const canvas = document.getElementById('mapCanvas');
+  const ctx = canvas.getContext('2d');
+  const cam = new APP.Camera();
 
-<!-- 頂部狀態列 -->
-<div id="hud">
-  <span class="chip">朝向 <b class="cyan" id="hudHeading">0</b>°</span>
-  <span class="chip"><b id="hudSteps">0</b> 步</span>
-  <span class="chip">剩餘 <b id="hudDist">--</b></span>
-  <span class="chip" id="hudPhase" data-phase="idle">待機</span>
-  <span class="chip" id="hudSim" style="display:none;color:#ffc857;border-color:rgba(255,200,87,0.5);">模擬朝向</span>
-  <span class="chip" id="buildTag" title="頁面版本（看不到 v4 就是讀到舊快取）">v4</span>
-</div>
+  const state = {
+    user: { x: 1500, y: 2500 },     // 真實位置
+    marker: { x: 1500, y: 2500 },   // 虛擬標記（等等我用的參考點）
+    displayPos: { x: 1500, y: 2500 }, // 畫面顯示用的平滑座標
+    arrowHeading: 0,                // 目前顯示的平滑方位角
+    userHeading: 0,                 // 感應器回報的實際方位角
+    headingOffset: 0,
+    stepCount: 0,
+    sensitivity: cfg.step.sensitivity,
+    stride: cfg.step.stride,
+    route: null,
+    routeIndex: 0,
+    start: null,
+    dest: null,
+    distanceLeft: 0,
+    bearing: null,
+    phase: 'idle',          // idle | calibrating | navigating | arrived
+    pickMode: null,         // null | 'start' | 'dest'
+    showGrid: true
+  };
 
-<!-- 方向校正提示條 -->
-<div id="calibBar">
-  <div class="calibLine">
-    <span>導航方位 <b id="calibBearing">--</b>°</span>
-    <span>箭頭 <b id="calibArrow">--</b>°</span>
-    <span>偏差 <b id="calibDev">--</b>°</span>
-  </div>
-  <div class="hint" id="calibHint">請將手機朝向導航方向，然後按「確認開始導航」</div>
-  <div class="row">
-    <button id="calibrateBtn" class="primary">確認開始導航</button>
-    <button id="skipCalibBtn">略過</button>
-  </div>
-</div>
+  const app = {
+    state: state,
+    cam: cam,
+    sensors: S,
 
-<!-- 右下浮動按鈕 -->
-<div id="fab">
-  <button id="recenterBtn" title="重設視角">◎</button>
-  <button id="panelToggle" title="開關控制面板">☰</button>
-</div>
+    /* ---------- 定位 / 步進（對齊 01.html 步幅與向量計算） ---------- */
+    addStep: function () {
+      state.stepCount++;
 
-<div id="toast"></div>
+      // 讀取步幅設定，將 1-100 對應至 780mm 基準
+      const strideInput = Math.max(1, Math.min(100, state.stride));
+      const currentStrideMM = (strideInput / 100) * 780;
 
-<!-- 控制面板 -->
-<div id="panel">
-  <div class="tabs">
-    <button class="tab active" data-tab="nav">導航</button>
-    <button class="tab" data-tab="pos">定位</button>
-    <button class="tab" data-tab="cfg">設定</button>
-  </div>
+      // 使用與 01.html 一致的三角函數計算前進方向
+      const rad = (-state.userHeading * Math.PI) / 180;
+      state.marker.x += Math.sin(rad) * currentStrideMM;
+      state.marker.y -= Math.cos(rad) * currentStrideMM;
 
-  <!-- ============ 導航 ============ -->
-  <section class="pane active" data-pane="nav">
-    <div class="field">
-      <label>起點</label>
-      <select id="startSelect"></select>
-      <div class="row2">
-        <input type="number" id="startX" step="10" inputmode="numeric" placeholder="X (mm)">
-        <input type="number" id="startY" step="10" inputmode="numeric" placeholder="Y (mm)">
-      </div>
-      <button class="mini" id="pickStartBtn">在地圖上點選起點</button>
-    </div>
+      // 限制在地圖邊界內
+      state.marker.x = G.clamp(state.marker.x, 0, cfg.map.width);
+      state.marker.y = G.clamp(state.marker.y, 0, cfg.map.height);
 
-    <div class="field">
-      <label>終點</label>
-      <select id="destSelect"></select>
-      <div class="row2">
-        <input type="number" id="destX" step="10" inputmode="numeric" placeholder="X (mm)">
-        <input type="number" id="destY" step="10" inputmode="numeric" placeholder="Y (mm)">
-      </div>
-      <button class="mini" id="pickDestBtn">在地圖上點選終點</button>
-    </div>
+      state.user.x = state.marker.x;
+      state.user.y = state.marker.y;
 
-    <div class="row">
-      <button id="planBtn" class="primary">確定並開始導航</button>
-      <button id="clearBtn">清除</button>
-    </div>
+      this.updateProgress();
+      cam.follow(state.user, 0.5);
+      if (APP.ui) APP.ui.syncStepCount(state.stepCount);
+    },
 
-    <p class="hint" id="planHint">
-      選單可直接挑房間／電掣，或自行輸入 X / Y（單位 mm，地圖 8200 × 7000）。
-      確定後紅箭頭會自動移到起點，並用有方向的導航線帶你走到終點。
-    </p>
-  </section>
+    setPosition: function (x, y) {
+      state.user.x = G.clamp(x, 0, cfg.map.width);
+      state.user.y = G.clamp(y, 0, cfg.map.height);
+      state.marker.x = state.user.x;
+      state.marker.y = state.user.y;
+      state.displayPos.x = state.user.x;
+      state.displayPos.y = state.user.y;
+      this.updateProgress();
+      cam.jumpTo(state.user);
+    },
 
-  <!-- ============ 定位 ============ -->
-  <section class="pane" data-pane="pos">
-    <button id="sensorBtn" class="primary">1. 啟動感應器與計步</button>
-    <p class="hint" id="sensorMsg">狀態：未啟動</p>
+    moveMarkerToUser: function () {
+      state.marker.x = state.user.x;
+      state.marker.y = state.user.y;
+    },
 
-    <button id="stepBtn" class="test">模擬跨一步</button>
+    moveUserToMarker: function () {
+      state.user.x = state.marker.x;
+      state.user.y = state.marker.y;
+      this.updateProgress();
+      cam.jumpTo(state.user);
+    },
 
-    <div class="row">
-      <button id="markBtn" class="warn">等等我（標記＝目前）</button>
-      <button id="syncBtn" class="ok">我已到標記位</button>
-    </div>
+    calibrateByDevice: function (code) {
+      const d = L.devices[code];
+      if (!d) return false;
+      state.user.x = d.x;
+      state.user.y = d.y;
+      state.marker.x = d.x;
+      state.marker.y = d.y;
+      state.displayPos.x = d.x;
+      state.displayPos.y = d.y;
+      this.updateProgress();
+      cam.jumpTo(state.user);
+      return true;
+    },
 
-    <div class="field" style="margin-top:14px;">
-      <label>牆上電掣校準</label>
-      <div class="row">
-        <input type="text" id="deviceInput" placeholder="SW-301">
-        <button id="deviceBtn" style="flex:0 0 72px;">校準</button>
-      </div>
-      <p class="hint">可用電掣：SW-301 ~ SW-305（見地圖上的橙點）</p>
-    </div>
-  </section>
+    /* ---------- 導航規劃 ---------- */
+    plan: function (start, dest) {
+      const route = Nav.findRoute(start, dest);
+      if (!route) return { ok: false, msg: '找不到路線：起點或終點在牆內／不連通' };
 
-  <!-- ============ 設定 ============ -->
-  <section class="pane" data-pane="cfg">
-    <div class="field">
-      <label>靈敏度閾值 <b id="sensVal">60</b>（越大越易觸發）</label>
-      <input type="range" id="sensitivityInput" min="1" max="100" value="60">
-    </div>
+      state.route = route;
+      state.start = { x: route.pts[0].x, y: route.pts[0].y };
+      state.dest = { x: route.pts[route.pts.length - 1].x, y: route.pts[route.pts.length - 1].y };
+      state.routeIndex = 0;
 
-    <div class="field">
-      <label>步幅 <b id="strideVal">5</b>　每步約 <span id="strideMM">39</span> mm</label>
-      <input type="range" id="strideInput" min="1" max="100" value="5">
-    </div>
+      state.user.x = state.start.x;
+      state.user.y = state.start.y;
+      state.marker.x = state.start.x;
+      state.marker.y = state.start.y;
+      state.displayPos.x = state.start.x;
+      state.displayPos.y = state.start.y;
 
-    <div class="field">
-      <label>
-        <input type="checkbox" id="simToggle"> 模擬朝向（沒有感應器時測試用）
-      </label>
-      <label style="margin-top:6px;">模擬方向 <b id="simVal">0</b>°</label>
-      <input type="range" id="simHeading" min="0" max="359" value="0">
-    </div>
+      state.phase = 'calibrating';
+      cam.jumpTo(state.start);
+      this.updateProgress();
 
-    <div class="field">
-      <label><input type="checkbox" id="gridToggle" checked> 顯示 1 m 網格</label>
-    </div>
+      return { ok: true, route: route };
+    },
 
-    <div class="field">
-      <label>視角</label>
-      <div class="btnGrid">
-        <button id="zoomOut">－</button>
-        <button id="zoomIn">＋</button>
-        <button id="rotL">↺</button>
-        <button id="rotR">↻</button>
-        <button id="resetViewBtn">重設</button>
-      </div>
-      <p class="hint">單指拖曳＝旋轉地圖，雙指＝同時旋轉＋縮放，滾輪＝縮放。地圖中心一直鎖在紅箭頭上，所以箭頭永遠在畫面正中。</p>
-    </div>
+    clearRoute: function () {
+      state.route = null;
+      state.routeIndex = 0;
+      state.start = null;
+      state.dest = null;
+      state.distanceLeft = 0;
+      state.bearing = null;
+      state.phase = 'idle';
+    },
 
-    <button id="resetBtn" class="warn">重置位置與導航</button>
-  </section>
-</div>
+    calibrate: function () {
+      const b = Nav.bearingToNext(state.user, state.route, state.routeIndex);
+      if (b === null) return false;
+      const raw = S.current();
+      state.headingOffset = G.norm360(b - raw);
+      state.arrowHeading = b;
+      state.bearing = b;
+      state.phase = 'navigating';
+      return true;
+    },
 
-<!-- ============ 模組（傳統 script，file:// 也可直接開啟） ============ -->
-<!-- 這 9 個 .js 必須和這份 HTML 放在同一層，檔名不要改 -->
-<script src="config.js"></script>
-<script src="geometry.js"></script>
-<script src="layout.js"></script>
-<script src="camera.js"></script>
-<script src="nav.js"></script>
-<script src="render.js"></script>
-<script src="sensors.js"></script>
-<script src="ui.js"></script>
-<script src="app.js"></script>
+    skipCalibration: function () {
+      state.phase = 'navigating';
+    },
 
-<!-- ============ 載入自檢：資源 404 / 模組掛掉時直接講明缺哪個，不要只給白畫面 ============ -->
-<script>
-(function () {
-  /* 每個檔案實際掛到 APP 上的名字 —— 注意 camera.js 是大寫 APP.Camera */
-  var mods = [
-    ['config', 'config.js'],
-    ['geometry', 'geometry.js'],
-    ['layout', 'layout.js'],
-    ['Camera', 'camera.js'],
-    ['nav', 'nav.js'],
-    ['render', 'render.js'],
-    ['sensors', 'sensors.js'],
-    ['ui', 'ui.js'],
-    ['app', 'app.js']
-  ];
+    deviation: function () {
+      const b = Nav.bearingToNext(state.user, state.route, state.routeIndex);
+      if (b === null) return null;
+      return G.norm180(b - state.arrowHeading);
+    },
 
-  var cssOk = false;
-  try {
-    var bg = getComputedStyle(document.body).backgroundColor;
-    cssOk = !!bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent';
-  } catch (e) { cssOk = true; }
+    bearingToNext: function () {
+      return Nav.bearingToNext(state.user, state.route, state.routeIndex);
+    },
 
-  /* 程式真的跑起來了嗎？app.state 存在 = app.js 執行到底 */
-  var booted = !!(window.APP && window.APP.app && window.APP.app.state);
+    updateProgress: function () {
+      if (!state.route) { state.distanceLeft = 0; state.bearing = null; return; }
+      state.routeIndex = Nav.nextIndex(state.user, state.route, state.routeIndex);
+      state.distanceLeft = Nav.remainingDistance(state.user, state.route, state.routeIndex);
+      state.bearing = Nav.bearingToNext(state.user, state.route, state.routeIndex) || state.bearing;
 
-  function banner(html, full) {
-    var el = document.createElement('div');
-    el.style.cssText = full
-      ? 'position:fixed;inset:0;z-index:99999;background:#0b0e13;color:#e6edf3;' +
-        'font:14px/1.75 -apple-system,"Microsoft JhengHei",sans-serif;padding:24px;overflow:auto;'
-      : 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#8a2230;color:#fff;' +
-        'font:13px/1.6 -apple-system,"Microsoft JhengHei",sans-serif;padding:9px 12px;';
-    el.innerHTML = html;
-    document.body.appendChild(el);
-  }
+      if (state.distanceLeft < cfg.nav.arriveRadius && state.phase === 'navigating') {
+        state.phase = 'arrived';
+      }
+    },
 
-  /* 1. 程式沒跑起來 → 全螢幕說明，列出缺哪幾個模組 */
-  if (!booted) {
-    var missing = [];
-    for (var i = 0; i < mods.length; i++) {
-      if (!window.APP || !window.APP[mods[i][0]]) missing.push(mods[i][1]);
+    recenter: function () {
+      cam.jumpTo(state.user);
+    },
+
+    resetView: function () {
+      cam.resetView();
+      cam.jumpTo(state.user);
+    },
+
+    zoomBy: function (f) { cam.zoomBy(f); },
+    rotateBy: function (d) { cam.rotateBy(d); },
+
+    setSensitivity: function (v) {
+      state.sensitivity = G.clamp(v, 1, 100);
+      S.setSensitivity(state.sensitivity);
+    },
+
+    setStride: function (v) {
+      state.stride = G.clamp(v, 1, 100);
+    },
+
+    strideMM: function () {
+      return (state.stride / 100) * 780;
+    },
+
+    setSimulate: function (on) {
+      S.simulate = !!on;
+    },
+
+    setSimHeading: function (deg) {
+      S.simulateHeading = G.norm360(deg);
+    },
+
+    setGrid: function (on) {
+      state.showGrid = !!on;
+    },
+
+    resetAll: function () {
+      this.clearRoute();
+      state.user.x = 1500;
+      state.user.y = 2500;
+      state.marker.x = 1500;
+      state.marker.y = 2500;
+      state.displayPos.x = 1500;
+      state.displayPos.y = 2500;
+      state.stepCount = 0;
+      state.headingOffset = 0;
+      cam.jumpTo(state.user);
+      cam.resetView();
+      if (APP.ui) APP.ui.syncStepCount(0);
+    },
+
+    setPickMode: function (mode) {
+      state.pickMode = state.pickMode === mode ? null : mode;
+      return state.pickMode;
+    },
+
+    handleTap: function (screenX, screenY) {
+      if (!state.pickMode) return;
+      const w = cam.screenToWorld({ x: screenX, y: screenY });
+      if (w.x < 0 || w.y < 0 || w.x > cfg.map.width || w.y > cfg.map.height) return;
+      const mode = state.pickMode;
+      state.pickMode = null;
+      if (APP.ui && APP.ui.handlePick) APP.ui.handlePick(mode, w);
+    },
+
+    updatePanelInset: function () {
+      const panel = document.getElementById('panel');
+      const open = panel.classList.contains('open');
+      const isBottomSheet = window.innerWidth < 760;
+      cam.setInsetBottom(open && isBottomSheet ? panel.offsetHeight : 0);
     }
-    if (!missing.length) missing.push('（模組都在，但 app.js 執行中出錯 → 請開瀏覽器 Console 看錯誤）');
+  };
 
-    banner(
-      '<h3 style="color:#ff6b81;margin:0 0 14px;font-size:17px;">程式載入失敗（v4）</h3>' +
-      '<p style="margin:0 0 6px;color:#8b98a8;font-size:13px;">以下檔案沒載入或沒執行：</p>' +
-      '<p style="margin:0 0 18px;color:#ffaa00;font-weight:700;word-break:break-all;">' +
-      missing.join('、') + '</p>' +
-      '<p style="margin:0 0 6px;font-size:13px;">請檢查：</p>' +
-      '<ol style="margin:0 0 18px;padding-left:20px;color:#c3ced9;font-size:13px;">' +
-      '<li>所有檔案放在<b>同一層</b>（不要放進 js/ 或 css/ 子資料夾）</li>' +
-      '<li>檔名完全一樣（全小寫：<code>camera.js</code>、<code>geometry.js</code> …）</li>' +
-      '<li>這份 HTML 也在同一層，並用它的檔名開啟（例如 index.html）</li>' +
-      '</ol>',
-      true
-    );
-    return;
+  APP.app = app;
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    cam.dpr = dpr;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+
+    cam.resize(w, h);
+    app.updatePanelInset();
   }
 
-  /* 2. 程式正常、只是樣式沒了 → 只在頂部提示，不遮住功能 */
-  if (!cssOk) {
-    banner('樣式檔 <b>style.css</b> 載入失敗（HTTP 404）：地圖仍可用，但版面會很簡陋。' +
-      '請確認 style.css 與 index.html 放在同一層。', false);
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', function () { setTimeout(resize, 250); });
+
+  APP.attachGestures(canvas, cam, {
+    onTap: function (x, y) { app.handleTap(x, y); }
+  });
+
+  /* ---------- 感應器回呼 ---------- */
+  S.onStep = function () { app.addStep(); };
+  S.onLog = function (msg) { if (APP.ui) APP.ui.setSensorMsg(msg); };
+  S.onHeading = function (h) { state.userHeading = h; };
+
+  /* =========================================================
+   * 動畫迴圈（導入 01.html 的 Lerp 平滑追隨邏輯）
+   * ========================================================= */
+  let last = 0;
+
+  function loop(now) {
+    const dt = last ? Math.min(now - last, 100) : 16;
+    last = now;
+
+    // 1. 同步實際感應器方向
+    state.userHeading = S.current();
+
+    // 2. 採用 01.html 的平滑內插法 (Lerp) 追隨位置與角度，消除抖動
+    state.displayPos.x += (state.marker.x - state.displayPos.x) * 0.2;
+    state.displayPos.y += (state.marker.y - state.displayPos.y) * 0.2;
+
+    const targetHeading = G.norm360(state.userHeading + state.headingOffset);
+    let diff = targetHeading - state.arrowHeading;
+    if (diff > 180) diff -= 360;
+    if (diff < -180) diff += 360;
+    state.arrowHeading = G.norm360(state.arrowHeading + diff * 0.2);
+
+    // 3. 攝影機跟隨平滑位置
+    cam.follow(state.user);
+
+    // 4. 進度 / 抵達判定
+    if (state.route) app.updateProgress();
+
+    // 5. 繪圖
+    R.frame(ctx, cam, state, now);
+
+    // 6. HUD
+    if (APP.ui) APP.ui.updateHud(state);
+
+    requestAnimationFrame(loop);
   }
+
+  resize();
+  APP.ui.init(app);
+  app.updatePanelInset();
+  cam.jumpTo(state.user);
+
+  S.autoStart();
+  setTimeout(function () { Nav.build(); }, 60);
+
+  requestAnimationFrame(loop);
 })();
-</script>
-
-</body>
-</html>
-
