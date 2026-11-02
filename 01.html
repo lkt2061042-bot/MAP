@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3000x3000mm 導航測試（Camera 置中與旋轉版）</title>
+    <title>3000x3000mm 導航測試（優化縮放與置中版）</title>
     <style>
         body { 
             margin: 0; padding: 0; font-family: sans-serif; 
@@ -18,7 +18,6 @@
         button.success { background: #00aa55; }
         button.test { background: #aa00ff; }
         
-        /* 畫布佔滿中間可用空間，讓紅箭頭永遠在正中央 */
         .canvas-container { flex: 1; position: relative; overflow: hidden; background: #181818; }
         canvas { display: block; width: 100%; height: 100%; }
         
@@ -33,7 +32,6 @@
         <p id="debugMsg" style="font-size: 11px; color: #ff5555; margin: 4px 0 0 0;">狀態: 等待啟動</p>
     </div>
 
-    <!-- 地圖畫布容器 -->
     <div class="canvas-container">
         <canvas id="mapCanvas"></canvas>
     </div>
@@ -80,30 +78,26 @@
 
     let userPos = { x: 1500, y: 2500 };   
     let markerPos = { x: 1500, y: 2500 };   
-    let displayPos = { x: 1500, y: 2500 };  // 用於平滑內插的顯示座標
+    let displayPos = { x: 1500, y: 2500 };  
     
     let userHeading = 0;              
     let displayHeading = 0;           
     let stepCount = 0;
     let isRunning = false;
 
-    // Camera 攝影機系統：負責以 displayPos 為中心，將地圖平滑跟隨並反向旋轉
+    // Camera 攝影機系統：大幅提升預設 scale，確保地圖足夠清晰放大
     const cam = {
         x: 1500,
         y: 2500,
-        scale: 0.15, // 放大倍率 (px per mm)
+        scale: 0.35, // 放大倍率從 0.15 提升至 0.35，讓地圖不再過小
         follow(target) {
             this.x += (target.x - this.x) * 0.15;
             this.y += (target.y - this.y) * 0.15;
         },
         applyTransform(ctx, vw, vh) {
-            // 將畫布原點移至畫面正中央
             ctx.translate(vw / 2, vh / 2);
-            // 讓地圖跟隨手機轉向反向旋轉，使紅箭頭永遠朝上且固定在中心
             ctx.rotate((-displayHeading * Math.PI) / 180);
-            // 縮放
             ctx.scale(this.scale, this.scale);
-            // 將鏡頭位置移至對應的 mm 座標
             ctx.translate(-this.x, -this.y);
         }
     };
@@ -124,16 +118,15 @@
         ctx.clearRect(0, 0, vw, vh);
 
         ctx.save();
-        // 套用 Camera 變換：地圖在腳下移動與旋轉
         cam.applyTransform(ctx, vw, vh);
 
         // 1. 繪製房間外框 (3000x3000mm)
-        ctx.strokeStyle = '#555';
+        ctx.strokeStyle = '#666';
         ctx.lineWidth = 15;
         ctx.strokeRect(0, 0, roomSize, roomSize);
 
         // 2. 畫網格 (每 1000mm 一格)
-        ctx.strokeStyle = '#222';
+        ctx.strokeStyle = '#333';
         ctx.lineWidth = 8;
         for (let i = 1000; i < roomSize; i += 1000) {
             ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, roomSize); ctx.stroke();
@@ -144,35 +137,33 @@
         for (let key in devices) {
             let dev = devices[key];
             ctx.fillStyle = '#ffaa00';
-            ctx.beginPath(); ctx.arc(dev.x, dev.y, 40, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = '#aaa'; ctx.font = '70px sans-serif';
-            ctx.fillText(key, dev.x + 60, dev.y + 25);
+            ctx.beginPath(); ctx.arc(dev.x, dev.y, 50, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 90px sans-serif';
+            ctx.fillText(key, dev.x + 70, dev.y + 30);
         }
 
         ctx.restore();
 
-        // 4. 紅箭頭：透過 Camera 變換後，永遠精準固定在畫面正中央！
+        // 4. 紅箭頭：永遠精準固定在畫面正中央
         const centerX = vw / 2;
         const centerY = vh / 2;
 
         ctx.save();
         ctx.translate(centerX, centerY);
-        // 因為地圖已經反向旋轉，這裡的紅箭頭保持朝上 (0度) 即可完美與世界對齊
         ctx.fillStyle = '#ff3366';
         ctx.beginPath();
-        ctx.moveTo(0, -18);
-        ctx.lineTo(-12, 14);
-        ctx.lineTo(12, 14);
+        ctx.moveTo(0, -24);
+        ctx.lineTo(-16, 18);
+        ctx.lineTo(16, 18);
         ctx.closePath();
         ctx.fill();
         ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2.5;
         ctx.stroke();
         ctx.restore();
     }
 
     function animationLoop() {
-        // 平滑更新位置與角度
         displayPos.x += (markerPos.x - displayPos.x) * 0.2;
         displayPos.y += (markerPos.y - displayPos.y) * 0.2;
 
@@ -181,7 +172,6 @@
         if (diff < -180) diff += 360;
         displayHeading += diff * 0.2;
 
-        // 攝影機鎖定並平滑跟隨目前顯示座標
         cam.follow(displayPos);
 
         drawRoom();
@@ -190,7 +180,7 @@
 
     function startAndroidSensor() {
         isRunning = true;
-        document.getElementById('debugMsg').innerText = "狀態: Camera 置中導航運行中...";
+        document.getElementById('debugMsg').innerText = "狀態: 導航運行中...";
         document.getElementById('debugMsg').style.color = "#00ffcc";
 
         if ('ondeviceorientationabsolute' in window) {
