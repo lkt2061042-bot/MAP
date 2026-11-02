@@ -1,0 +1,391 @@
+/* =========================================================
+ * style.css — 深色介面、滿版地圖、可收合底部面板
+ * ========================================================= */
+:root {
+  --bg: #0b0e13;
+  --panel: #151b24;
+  --panel2: #1b2330;
+  --line: #2b3543;
+  --txt: #e6edf3;
+  --muted: #8b98a8;
+  --accent: #2f81f7;
+  --ok: #2ea043;
+  --warn: #d29922;
+  --cyan: #00ffcc;
+  --danger: #ff3366;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--txt);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft JhengHei",
+    "PingFang HK", "Noto Sans TC", sans-serif;
+  overscroll-behavior: none;
+}
+
+#mapCanvas {
+  position: fixed;
+  inset: 0;
+  display: block;
+  touch-action: none;
+  cursor: grab;
+}
+#mapCanvas:active {
+  cursor: grabbing;
+}
+
+/* ---------------- 頂部 HUD ---------------- */
+#hud {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+  padding-top: calc(10px + env(safe-area-inset-top));
+  pointer-events: none;
+  flex-wrap: wrap;
+}
+
+.chip {
+  background: rgba(18, 24, 33, 0.82);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+}
+.chip b {
+  color: var(--txt);
+  font-size: 13px;
+}
+.chip b.cyan {
+  color: var(--cyan);
+}
+#hudPhase[data-phase="navigating"] {
+  color: var(--cyan);
+  border-color: rgba(0, 255, 204, 0.45);
+}
+#hudPhase[data-phase="calibrating"] {
+  color: #ffc857;
+  border-color: rgba(255, 200, 87, 0.45);
+}
+#hudPhase[data-phase="arrived"] {
+  color: #7ee787;
+  border-color: rgba(126, 231, 135, 0.45);
+}
+
+/* ---------------- 浮動按鈕 ---------------- */
+#fab {
+  position: fixed;
+  right: 12px;
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#fab button {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: rgba(21, 27, 36, 0.92);
+  color: var(--txt);
+  font-size: 18px;
+  line-height: 1;
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.15s ease;
+}
+#fab button:active {
+  transform: scale(0.93);
+}
+#fab button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* ---------------- 校準提示條 ---------------- */
+#calibBar {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(74px + env(safe-area-inset-bottom));
+  z-index: 35;
+  display: none;
+  background: rgba(15, 21, 29, 0.96);
+  border: 1px solid rgba(255, 200, 87, 0.45);
+  border-radius: 14px;
+  padding: 10px 12px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+#calibBar.show {
+  display: block;
+}
+#calibBar .calibLine {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+#calibBar .calibLine b {
+  color: var(--txt);
+}
+#calibBar .hint {
+  font-size: 12px;
+  color: #ffc857;
+  margin: 6px 0 8px;
+}
+
+/* ---------------- 面板 ---------------- */
+#panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  max-height: 62vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  border-radius: 16px 16px 0 0;
+  transform: translateY(104%);
+  transition: transform 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+  padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.5);
+}
+#panel.open {
+  transform: translateY(0);
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+.tab {
+  flex: 1;
+  padding: 8px 6px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tab.active {
+  background: var(--panel2);
+  color: var(--txt);
+}
+
+.pane {
+  display: none;
+  padding: 12px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  flex: 1 1 auto;
+}
+.pane.active {
+  display: block;
+}
+
+.field {
+  margin-bottom: 12px;
+}
+.field > label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 5px;
+}
+
+select,
+input[type="number"],
+input[type="text"] {
+  width: 100%;
+  padding: 9px 10px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--txt);
+  font-size: 14px;
+  outline: none;
+}
+select:focus,
+input:focus {
+  border-color: var(--accent);
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  margin: 4px 0;
+}
+
+input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.row > * {
+  flex: 1;
+}
+.row2 {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.row2 > * {
+  flex: 1;
+  min-width: 0;
+}
+
+button {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--txt);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.1s ease;
+  font-family: inherit;
+}
+button:active {
+  transform: scale(0.98);
+}
+button:disabled {
+  opacity: 0.55;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+button.ok {
+  background: rgba(46, 160, 67, 0.9);
+  border-color: rgba(46, 160, 67, 0.9);
+  color: #fff;
+}
+button.warn {
+  background: rgba(210, 153, 34, 0.16);
+  border-color: rgba(210, 153, 34, 0.5);
+  color: #f0c15c;
+}
+button.test {
+  background: rgba(170, 0, 255, 0.18);
+  border-color: rgba(170, 0, 255, 0.55);
+  color: #d8a6ff;
+  width: 100%;
+}
+button.mini {
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  width: 100%;
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.btnGrid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+.btnGrid button {
+  padding: 9px 4px;
+  font-size: 12px;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 8px 0 0;
+}
+.hint.warnText {
+  color: #f0c15c;
+}
+
+/* ---------------- 提示 toast ---------------- */
+#toast {
+  position: fixed;
+  left: 50%;
+  top: calc(50% + 62px);
+  transform: translate(-50%, -50%) scale(0.96);
+  z-index: 60;
+  background: rgba(15, 21, 29, 0.96);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 9px 16px;
+  font-size: 13px;
+  color: var(--txt);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  max-width: 78vw;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+#toast.show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* 桌面：面板固定在左側 */
+@media (min-width: 760px) {
+  #panel {
+    left: 14px;
+    right: auto;
+    bottom: 14px;
+    width: 330px;
+    max-height: calc(100vh - 28px);
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    transform: translateX(-115%);
+  }
+  #panel.open {
+    transform: translateX(0);
+  }
+  #calibBar {
+    left: auto;
+    right: 12px;
+    width: 320px;
+    bottom: 74px;
+  }
+  #fab {
+    bottom: 14px;
+  }
+}
