@@ -161,14 +161,21 @@
 <script src="ui.js"></script>
 <script src="app.js"></script>
 
-<!-- ============ 載入自檢：資源 404 時直接講明缺哪個，不要只給白畫面 ============ -->
+<!-- ============ 載入自檢：資源 404 / 模組掛掉時直接講明缺哪個，不要只給白畫面 ============ -->
 <script>
 (function () {
-  var need = ['config', 'geometry', 'layout', 'camera', 'nav', 'render', 'sensors', 'ui', 'app'];
-  var missing = [];
-  for (var i = 0; i < need.length; i++) {
-    if (!window.APP || !window.APP[need[i]]) missing.push(need[i] + '.js');
-  }
+  /* 每個檔案實際掛到 APP 上的名字 —— 注意 camera.js 是大寫 APP.Camera */
+  var mods = [
+    ['config', 'config.js'],
+    ['geometry', 'geometry.js'],
+    ['layout', 'layout.js'],
+    ['Camera', 'camera.js'],
+    ['nav', 'nav.js'],
+    ['render', 'render.js'],
+    ['sensors', 'sensors.js'],
+    ['ui', 'ui.js'],
+    ['app', 'app.js']
+  ];
 
   var cssOk = false;
   try {
@@ -176,27 +183,49 @@
     cssOk = !!bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent';
   } catch (e) { cssOk = true; }
 
-  if (missing.length === 0 && cssOk) return;
-  if (!cssOk) missing.unshift('style.css');
+  /* 程式真的跑起來了嗎？app.state 存在 = app.js 執行到底 */
+  var booted = !!(window.APP && window.APP.app && window.APP.app.state);
 
-  var dir = location.href.replace(/[?#].*$/, '').replace(/[^/]*$/, '');
-  var box = document.createElement('div');
-  box.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0b0e13;color:#e6edf3;' +
-    'font:14px/1.75 -apple-system,"Microsoft JhengHei",sans-serif;padding:24px;overflow:auto;';
-  box.innerHTML =
-    '<h3 style="color:#ff6b81;margin:0 0 14px;font-size:17px;">資源載入失敗（HTTP 404）</h3>' +
-    '<p style="margin:0 0 6px;color:#8b98a8;font-size:13px;">以下檔案找不到：</p>' +
-    '<p style="margin:0 0 18px;color:#ffaa00;font-weight:700;word-break:break-all;">' +
-    missing.join('、') + '</p>' +
-    '<p style="margin:0 0 6px;font-size:13px;">請檢查：</p>' +
-    '<ol style="margin:0 0 18px;padding-left:20px;color:#c3ced9;font-size:13px;">' +
-    '<li>所有檔案要放在<b>同一層</b>（不要放進 js/ 或 css/ 子資料夾）</li>' +
-    '<li>檔名要完全一樣（全小寫：<code>config.js</code>、<code>geometry.js</code> …）</li>' +
-    '<li>這份 HTML 也要放在同一層</li>' +
-    '</ol>' +
-    '<p style="margin:0;color:#8b98a8;font-size:12px;word-break:break-all;">目前所在目錄：<br>' +
-    '<span style="color:#e6edf3;">' + dir + '</span></p>';
-  document.body.appendChild(box);
+  function banner(html, full) {
+    var el = document.createElement('div');
+    el.style.cssText = full
+      ? 'position:fixed;inset:0;z-index:99999;background:#0b0e13;color:#e6edf3;' +
+        'font:14px/1.75 -apple-system,"Microsoft JhengHei",sans-serif;padding:24px;overflow:auto;'
+      : 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#8a2230;color:#fff;' +
+        'font:13px/1.6 -apple-system,"Microsoft JhengHei",sans-serif;padding:9px 12px;';
+    el.innerHTML = html;
+    document.body.appendChild(el);
+  }
+
+  /* 1. 程式沒跑起來 → 全螢幕說明，列出缺哪幾個模組 */
+  if (!booted) {
+    var missing = [];
+    for (var i = 0; i < mods.length; i++) {
+      if (!window.APP || !window.APP[mods[i][0]]) missing.push(mods[i][1]);
+    }
+    if (!missing.length) missing.push('（模組都在，但 app.js 執行中出錯 → 請開瀏覽器 Console 看錯誤）');
+
+    banner(
+      '<h3 style="color:#ff6b81;margin:0 0 14px;font-size:17px;">程式載入失敗</h3>' +
+      '<p style="margin:0 0 6px;color:#8b98a8;font-size:13px;">以下檔案沒載入或沒執行：</p>' +
+      '<p style="margin:0 0 18px;color:#ffaa00;font-weight:700;word-break:break-all;">' +
+      missing.join('、') + '</p>' +
+      '<p style="margin:0 0 6px;font-size:13px;">請檢查：</p>' +
+      '<ol style="margin:0 0 18px;padding-left:20px;color:#c3ced9;font-size:13px;">' +
+      '<li>所有檔案放在<b>同一層</b>（不要放進 js/ 或 css/ 子資料夾）</li>' +
+      '<li>檔名完全一樣（全小寫：<code>camera.js</code>、<code>geometry.js</code> …）</li>' +
+      '<li>這份 HTML 也在同一層，並用它的檔名開啟（例如 index.html）</li>' +
+      '</ol>',
+      true
+    );
+    return;
+  }
+
+  /* 2. 程式正常、只是樣式沒了 → 只在頂部提示，不遮住功能 */
+  if (!cssOk) {
+    banner('樣式檔 <b>style.css</b> 載入失敗（HTTP 404）：地圖仍可用，但版面會很簡陋。' +
+      '請確認 style.css 與 index.html 放在同一層。', false);
+  }
 })();
 </script>
 
