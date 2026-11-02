@@ -19,7 +19,7 @@
 
   let app = null;
   const el = {};
-  const cache = { heading: null, steps: null, dist: null, phase: null };
+  const cache = { heading: null, steps: null, dist: null, phase: null, sensorAt: 0, sim: null };
   let toastTimer = 0;
 
   /* ---------------- 建立下拉選單 ---------------- */
@@ -118,7 +118,7 @@
     app = appRef;
 
     const ids = [
-      'hudHeading', 'hudSteps', 'hudDist', 'hudPhase',
+      'hudHeading', 'hudSteps', 'hudDist', 'hudPhase', 'hudSim',
       'calibBar', 'calibBearing', 'calibArrow', 'calibDev', 'calibHint',
       'calibrateBtn', 'skipCalibBtn',
       'panel', 'panelToggle', 'recenterBtn', 'toast',
@@ -202,11 +202,11 @@
 
     /* --- 感應器 / 步進 --- */
     el.sensorBtn.addEventListener('click', async function () {
-      const ok = await app.sensors.start();
-      if (ok) {
-        el.sensorBtn.textContent = '感應器已啟動';
-        el.sensorBtn.disabled = true;
-        setSensorMsg('狀態：運行中 — 走一步試試，或用「模擬跨一步」');
+      // 已啟動就重啟一次（有些機型要重新註冊才開始送事件）
+      if (app.sensors.running) app.sensors.stop();
+      const ok2 = await app.sensors.start();
+      if (ok2) {
+        setSensorMsg('狀態：' + app.sensors.describe());
       } else {
         setSensorMsg('狀態：啟動失敗，可開啟「模擬朝向」測試');
       }
@@ -351,6 +351,28 @@
       toast('已到達目的地');
     }
     if (state.phase !== 'arrived') el.hudPhase.dataset.announced = '';
+
+    // 感應器狀態（每秒更新一次，讓使用者知道卡在哪一步）
+    const ms = Date.now();
+    if (ms - cache.sensorAt > 1000) {
+      cache.sensorAt = ms;
+      const S = APP.sensors;
+      if (S) {
+        const label = !S.running
+          ? '1. 啟動感應器與計步'
+          : (S.hasHeading ? '感應器運作中（可重新啟動）' : '再試一次啟動感應器');
+        if (el.sensorBtn.textContent !== label) el.sensorBtn.textContent = label;
+
+        if (S.running && el.sensorMsg.textContent.indexOf('狀態：') === 0) {
+          el.sensorMsg.textContent = '狀態：' + S.describe();
+        }
+        const sim = !!S.simulate;
+        if (sim !== cache.sim) {
+          cache.sim = sim;
+          el.hudSim.style.display = sim ? '' : 'none';
+        }
+      }
+    }
   }
 
   function syncStepCount(n) {
