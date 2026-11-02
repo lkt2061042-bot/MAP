@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3000x3000mm 導航與自動校正測試版</title>
+    <title>3000x3000mm 導航測試（優化縮放與置中版）</title>
     <style>
         body { 
             margin: 0; padding: 0; font-family: sans-serif; 
@@ -11,20 +11,18 @@
             overflow: hidden; height: 100vh; display: flex; flex-direction: column; justify-content: space-between;
         }
         .top-panel { background: #1e1e1e; padding: 8px; font-size: 14px; z-index: 10; border-bottom: 1px solid #333; }
-        .bottom-panel { background: #1e1e1e; padding: 10px; font-size: 13px; text-align: left; z-index: 10; max-height: 45vh; overflow-y: auto; border-top: 1px solid #333; }
-        button, input, select { padding: 8px; font-size: 14px; background: #222; color: #fff; border: 1px solid #444; border-radius: 4px; margin-top: 4px; }
+        .bottom-panel { background: #1e1e1e; padding: 10px; font-size: 13px; text-align: left; z-index: 10; max-height: 40vh; overflow-y: auto; border-top: 1px solid #333; }
+        button, input { padding: 8px; font-size: 14px; background: #222; color: #fff; border: 1px solid #444; border-radius: 4px; margin-top: 4px; }
         button { background: #0055ff; cursor: pointer; font-weight: bold; width: 100%; }
         button.warning { background: #ff5500; }
         button.success { background: #00aa55; }
         button.test { background: #aa00ff; }
-        button.nav-btn { background: #2ea043; }
         
         .canvas-container { flex: 1; position: relative; overflow: hidden; background: #181818; }
         canvas { display: block; width: 100%; height: 100%; }
         
         .row { display: flex; gap: 8px; }
         .flex-center { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
-        .group-box { background: #262c36; padding: 6px; border-radius: 6px; margin-top: 6px; }
     </style>
 </head>
 <body>
@@ -39,47 +37,29 @@
     </div>
 
     <div class="bottom-panel">
-        <!-- 導航起終點設定區 -->
-        <div class="group-box">
-            <div style="font-weight: bold; margin-bottom: 2px; color: #00ffcc;">導航規劃</div>
-            <div class="flex-center">
-                <span style="width: 40px;">起點:</span>
-                <select id="startSelect" style="flex: 1;">
-                    <option value="current">◎ 目前位置</option>
-                    <option value="SW-301">SW-301 (北牆)</option>
-                    <option value="SW-302">SW-302 (東牆)</option>
-                    <option value="SW-303">SW-303 (南牆)</option>
-                    <option value="SW-304">SW-304 (西牆)</option>
-                </select>
-            </div>
-            <div class="flex-center">
-                <span style="width: 40px;">終點:</span>
-                <select id="destSelect" style="flex: 1;">
-                    <option value="SW-301">SW-301 (北牆)</option>
-                    <option value="SW-302">SW-302 (東牆)</option>
-                    <option value="SW-303" selected>SW-303 (南牆)</option>
-                    <option value="SW-304">SW-304 (西牆)</option>
-                </select>
-            </div>
-            <button class="nav-btn" onclick="startNavigation()" style="margin-top: 6px;">確定並自動校正面向導航線</button>
-        </div>
-
-        <div style="margin-top: 6px;"><strong>步數與參數設定</strong></div>
+        <div><strong>步數參數設定 (1-100)</strong></div>
         <div class="flex-center">
-            <span>靈敏度 (60):</span>
+            <span>靈敏度閥值 (預設60):</span>
             <input type="number" id="sensitivityInput" min="1" max="100" value="60" style="width: 60px; text-align: center;">
-            <span>步幅 (5):</span>
+        </div>
+        <div class="flex-center">
+            <span>步幅大小 (預設5):</span>
             <input type="number" id="strideInput" min="1" max="100" value="5" style="width: 60px; text-align: center;">
         </div>
 
-        <div class="row" style="margin-top: 4px;">
-            <button class="test" onclick="simulateStep()">模擬跨一步</button>
-            <button class="warning" onclick="waitMarker()">等等我</button>
-            <button class="success" onclick="syncPositionAtMarker()">到標記位</button>
+        <div style="margin-top: 4px;">
+            <button class="test" onclick="simulateStep()">模擬跨一步 (+步數)</button>
         </div>
-
+        <div class="row" style="margin-top: 4px;">
+            <button class="warning" onclick="waitMarker()">等等我 (拉回標記)</button>
+            <button class="success" onclick="syncPositionAtMarker()">我已到標記位</button>
+        </div>
+        <div style="margin-top: 4px;" class="row">
+            <input type="text" id="deviceInput" placeholder="牆上電掣 (如 SW-301)" style="flex: 1;">
+            <button onclick="calibrateByDevice()" style="flex: 0 0 70px; margin-top:4px;">校準</button>
+        </div>
         <p style="margin: 4px 0 0 0; color: #aaa; font-size: 11px; text-align: center;">
-            朝向: <span id="heading" style="color: #00ffcc; font-weight: bold;">--</span>° | 步數: <span id="stepCount">0</span> 步 | 剩餘距離: <span id="distLeft">--</span>
+            朝向角度: <span id="heading" style="color: #00ffcc; font-weight: bold;">--</span>° | 步數: <span id="stepCount">0</span> 步
         </p>
     </div>
 
@@ -102,17 +82,14 @@
     
     let userHeading = 0;              
     let displayHeading = 0;           
-    let headingOffset = 0;            // 用於自動校正面向導航線的偏移量
     let stepCount = 0;
     let isRunning = false;
 
-    // 導航路線相關變數
-    let currentRoute = null;          // 儲存起點到終點的座標點陣列
-
+    // Camera 攝影機系統：大幅提升預設 scale，確保地圖足夠清晰放大
     const cam = {
         x: 1500,
         y: 2500,
-        scale: 0.35, 
+        scale: 0.35, // 放大倍率從 0.15 提升至 0.35，讓地圖不再過小
         follow(target) {
             this.x += (target.x - this.x) * 0.15;
             this.y += (target.y - this.y) * 0.15;
@@ -135,48 +112,6 @@
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
-    // 計算兩點之間的距離 (mm)
-    function getDist(p1, p2) {
-        return Math.hypot(p2.x - p1.x, p2.y - p1.y);
-    }
-
-    // 計算從 p1 看 p2 的方位角 (0度朝北，順時針)
-    function getBearing(p1, p2) {
-        let rad = Math.atan2(p2.x - p1.x, p1.y - p2.y);
-        let deg = (rad * 180) / Math.PI;
-        return (deg + 360) % 360;
-    }
-
-    // 啟動導航並自動校正面向
-    function startNavigation() {
-        const startVal = document.getElementById('startSelect').value;
-        const destVal = document.getElementById('destSelect').value;
-
-        let startPt = { x: userPos.x, y: userPos.y };
-        if (startVal !== 'current' && devices[startVal]) {
-            startPt = { x: devices[startVal].x, y: devices[startVal].y };
-            userPos.x = startPt.x; userPos.y = startPt.y;
-            markerPos.x = startPt.x; markerPos.y = startPt.y;
-        }
-
-        if (!devices[destVal]) {
-            alert('請選擇有效的終點！');
-            return;
-        }
-        let destPt = { x: devices[destVal].x, y: devices[destVal].y };
-
-        // 建立簡單直線導航路線（可擴充為 A* 節點）
-        currentRoute = [startPt, destPt];
-
-        // 計算起點到下一個目標點的方向角
-        const targetBearing = getBearing(startPt, destPt);
-
-        // 自動校正：計算感應器原始角度與導航方向的夾角偏差，並寫入 headingOffset
-        headingOffset = (targetBearing - userHeading + 360) % 360;
-
-        alert(`導航已設定！自動校正方位：${Math.round(targetBearing)}°`);
-    }
-
     function drawRoom() {
         const vw = canvas.width / window.devicePixelRatio;
         const vh = canvas.height / window.devicePixelRatio;
@@ -185,12 +120,12 @@
         ctx.save();
         cam.applyTransform(ctx, vw, vh);
 
-        // 1. 房間外框
+        // 1. 繪製房間外框 (3000x3000mm)
         ctx.strokeStyle = '#666';
         ctx.lineWidth = 15;
         ctx.strokeRect(0, 0, roomSize, roomSize);
 
-        // 2. 網格
+        // 2. 畫網格 (每 1000mm 一格)
         ctx.strokeStyle = '#333';
         ctx.lineWidth = 8;
         for (let i = 1000; i < roomSize; i += 1000) {
@@ -198,46 +133,7 @@
             ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(roomSize, i); ctx.stroke();
         }
 
-        // 3. 繪製有方向性的導航線與箭頭
-        if (currentRoute && currentRoute.length >= 2) {
-            ctx.strokeStyle = 'rgba(0, 255, 170, 0.85)';
-            ctx.lineWidth = 30;
-            ctx.lineCap = 'round';
-            ctx.beginPath();
-            ctx.moveTo(currentRoute[0].x, currentRoute[0].y);
-            for (let i = 1; i < currentRoute.length; i++) {
-                ctx.lineTo(currentRoute[i].x, currentRoute[i].y);
-            }
-            ctx.stroke();
-
-            // 在導航線上畫出引導方向的小箭頭
-            let p1 = currentRoute[0];
-            let p2 = currentRoute[currentRoute.length - 1];
-            let angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-            let midX = (p1.x + p2.x) / 2;
-            let midY = (p1.y + p2.y) / 2;
-
-            ctx.save();
-            ctx.translate(midX, midY);
-            ctx.rotate(angle + Math.PI / 2);
-            ctx.fillStyle = '#ffff00';
-            ctx.beginPath();
-            ctx.moveTo(0, -20);
-            ctx.lineTo(-15, 20);
-            ctx.lineTo(15, 20);
-            ctx.closePath();
-            ctx.fill();
-            ctx.restore();
-
-            // 標示終點光圈
-            ctx.strokeStyle = '#ffd166';
-            ctx.lineWidth = 20;
-            ctx.beginPath();
-            ctx.arc(p2.x, p2.y, 120, 0, Math.PI * 2);
-            ctx.stroke();
-        }
-
-        // 4. 電掣點
+        // 3. 畫電掣
         for (let key in devices) {
             let dev = devices[key];
             ctx.fillStyle = '#ffaa00';
@@ -248,7 +144,7 @@
 
         ctx.restore();
 
-        // 5. 紅箭頭 (永遠置中)
+        // 4. 紅箭頭：永遠精準固定在畫面正中央
         const centerX = vw / 2;
         const centerY = vh / 2;
 
@@ -271,21 +167,12 @@
         displayPos.x += (markerPos.x - displayPos.x) * 0.2;
         displayPos.y += (markerPos.y - displayPos.y) * 0.2;
 
-        // 套用自動校正後的偏向角計算顯示轉向
-        let calibratedHeading = (userHeading + headingOffset) % 360;
-        let diff = calibratedHeading - displayHeading;
+        let diff = userHeading - displayHeading;
         if (diff > 180) diff -= 360;
         if (diff < -180) diff += 360;
         displayHeading += diff * 0.2;
 
         cam.follow(displayPos);
-
-        // 即時計算剩餘距離
-        if (currentRoute && currentRoute.length >= 2) {
-            let dest = currentRoute[currentRoute.length - 1];
-            let dist = getDist(displayPos, dest);
-            document.getElementById('distLeft').innerText = (dist / 1000).toFixed(2) + ' m';
-        }
 
         drawRoom();
         requestAnimationFrame(animationLoop);
@@ -293,7 +180,7 @@
 
     function startAndroidSensor() {
         isRunning = true;
-        document.getElementById('debugMsg').innerText = "狀態: 導航感應中...";
+        document.getElementById('debugMsg').innerText = "狀態: 導航運行中...";
         document.getElementById('debugMsg').style.color = "#00ffcc";
 
         if ('ondeviceorientationabsolute' in window) {
@@ -301,6 +188,7 @@
         } else {
             window.addEventListener('deviceorientation', handleOrientation, true);
         }
+        
         alert('已啟動感應器！');
     }
 
@@ -308,7 +196,7 @@
         let heading = event.alpha;
         if (heading !== null) {
             userHeading = heading;
-            document.getElementById('heading').innerText = Math.round((userHeading + headingOffset) % 360);
+            document.getElementById('heading').innerText = Math.round(userHeading);
         }
     }
 
@@ -320,9 +208,7 @@
         strideInput = Math.max(1, Math.min(100, strideInput));
         let currentStrideMM = (strideInput / 100) * 780;
 
-        // 依據校正後的方位前進
-        let calibratedHeading = (userHeading + headingOffset) % 360;
-        let rad = (calibratedHeading * Math.PI) / 180;
+        let rad = (userHeading * Math.PI) / 180;
         markerPos.x += Math.sin(rad) * currentStrideMM;
         markerPos.y -= Math.cos(rad) * currentStrideMM; 
 
@@ -346,6 +232,24 @@
     function syncPositionAtMarker() {
         userPos.x = markerPos.x;
         userPos.y = markerPos.y;
+    }
+
+    function calibrateByDevice() {
+        let code = document.getElementById('deviceInput').value.trim().toUpperCase();
+        if (devices[code]) {
+            userPos.x = devices[code].x;
+            userPos.y = devices[code].y;
+            markerPos.x = devices[code].x;
+            markerPos.y = devices[code].y;
+            displayPos.x = devices[code].x;
+            displayPos.y = devices[code].y;
+            cam.x = devices[code].x;
+            cam.y = devices[code].y;
+            alert(`成功校準至: ${devices[code].name}`);
+            document.getElementById('deviceInput').value = '';
+        } else {
+            alert('無效的電掣編號！請輸入 SW-301 至 SW-304');
+        }
     }
 
     let lastPeakTime = 0;
