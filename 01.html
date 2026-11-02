@@ -8,7 +8,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>室內導航測試 · 4 房間 / 2 走廊</title>
-<link rel="stylesheet" href="css/style.css">
+<!-- 所有檔案都放在同一層，路徑一律用相對檔名 -->
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
@@ -149,15 +150,55 @@
 </div>
 
 <!-- ============ 模組（傳統 script，file:// 也可直接開啟） ============ -->
-<script src="js/config.js"></script>
-<script src="js/geometry.js"></script>
-<script src="js/layout.js"></script>
-<script src="js/camera.js"></script>
-<script src="js/nav.js"></script>
-<script src="js/render.js"></script>
-<script src="js/sensors.js"></script>
-<script src="js/ui.js"></script>
-<script src="js/app.js"></script>
+<!-- 這 9 個 .js 必須和這份 HTML 放在同一層，檔名不要改 -->
+<script src="config.js"></script>
+<script src="geometry.js"></script>
+<script src="layout.js"></script>
+<script src="camera.js"></script>
+<script src="nav.js"></script>
+<script src="render.js"></script>
+<script src="sensors.js"></script>
+<script src="ui.js"></script>
+<script src="app.js"></script>
+
+<!-- ============ 載入自檢：資源 404 時直接講明缺哪個，不要只給白畫面 ============ -->
+<script>
+(function () {
+  var need = ['config', 'geometry', 'layout', 'camera', 'nav', 'render', 'sensors', 'ui', 'app'];
+  var missing = [];
+  for (var i = 0; i < need.length; i++) {
+    if (!window.APP || !window.APP[need[i]]) missing.push(need[i] + '.js');
+  }
+
+  var cssOk = false;
+  try {
+    var bg = getComputedStyle(document.body).backgroundColor;
+    cssOk = !!bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent';
+  } catch (e) { cssOk = true; }
+
+  if (missing.length === 0 && cssOk) return;
+  if (!cssOk) missing.unshift('style.css');
+
+  var dir = location.href.replace(/[?#].*$/, '').replace(/[^/]*$/, '');
+  var box = document.createElement('div');
+  box.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0b0e13;color:#e6edf3;' +
+    'font:14px/1.75 -apple-system,"Microsoft JhengHei",sans-serif;padding:24px;overflow:auto;';
+  box.innerHTML =
+    '<h3 style="color:#ff6b81;margin:0 0 14px;font-size:17px;">資源載入失敗（HTTP 404）</h3>' +
+    '<p style="margin:0 0 6px;color:#8b98a8;font-size:13px;">以下檔案找不到：</p>' +
+    '<p style="margin:0 0 18px;color:#ffaa00;font-weight:700;word-break:break-all;">' +
+    missing.join('、') + '</p>' +
+    '<p style="margin:0 0 6px;font-size:13px;">請檢查：</p>' +
+    '<ol style="margin:0 0 18px;padding-left:20px;color:#c3ced9;font-size:13px;">' +
+    '<li>所有檔案要放在<b>同一層</b>（不要放進 js/ 或 css/ 子資料夾）</li>' +
+    '<li>檔名要完全一樣（全小寫：<code>config.js</code>、<code>geometry.js</code> …）</li>' +
+    '<li>這份 HTML 也要放在同一層</li>' +
+    '</ol>' +
+    '<p style="margin:0;color:#8b98a8;font-size:12px;word-break:break-all;">目前所在目錄：<br>' +
+    '<span style="color:#e6edf3;">' + dir + '</span></p>';
+  document.body.appendChild(box);
+})();
+</script>
 
 </body>
 </html>
