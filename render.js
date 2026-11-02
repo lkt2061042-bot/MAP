@@ -1,9 +1,5 @@
 /* =========================================================
  * render.js — 全部繪圖
- *
- * 圖層順序：
- *   背景 → 地板 → 網格 → 牆 → 門 → 導航線 → 標記 → 電掣
- *   → 螢幕座標標籤（房間名/電掣）→ 紅箭頭（固定在焦點）
  * ========================================================= */
 (function () {
   'use strict';
@@ -12,21 +8,18 @@
   const L = APP.layout;
   const C = cfg.colors;
 
-  /* ---------- 地板 ---------- */
   function drawFloor(ctx) {
     for (let i = 0; i < L.tiles.length; i++) {
       const t = L.tiles[i];
       ctx.fillStyle = t.type === 'corridor' ? C.floorCorridor : C.floorRoom;
       ctx.fillRect(t.x, t.y, t.w, t.h);
 
-      // 房間內圈淡邊，增加立體感
       ctx.strokeStyle = C.floorEdge;
       ctx.lineWidth = 18;
       ctx.strokeRect(t.x + 9, t.y + 9, t.w - 18, t.h - 18);
     }
   }
 
-  /* ---------- 1m 網格 ---------- */
   function drawGrid(ctx, show) {
     if (!show) return;
     const step = 1000;
@@ -44,12 +37,10 @@
     ctx.stroke();
   }
 
-  /* ---------- 牆 ---------- */
   function drawWalls(ctx) {
     ctx.lineCap = 'square';
     ctx.lineJoin = 'miter';
 
-    // 外描邊（暗）→ 主牆（亮）→ 高光細線
     ctx.strokeStyle = 'rgba(0,0,0,0.55)';
     ctx.lineWidth = cfg.wall.thickness + 70;
     strokeAll(ctx);
@@ -73,7 +64,6 @@
     ctx.stroke();
   }
 
-  /* ---------- 門洞（虛線表示可通行） ---------- */
   function drawDoors(ctx) {
     ctx.save();
     ctx.strokeStyle = C.door;
@@ -94,7 +84,6 @@
     ctx.restore();
   }
 
-  /* ---------- 沿線等距取點 ---------- */
   function walkAlong(pts, spacing, offset, cb) {
     if (!pts || pts.length < 2) return;
     let acc = 0;
@@ -114,7 +103,6 @@
     }
   }
 
-  /* ---------- 有方向性的導航線 ---------- */
   function drawRoute(ctx, state, now) {
     const route = state.route;
     if (!route || route.pts.length < 2) return;
@@ -125,7 +113,6 @@
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    // 光暈
     ctx.strokeStyle = C.routeGlow;
     ctx.lineWidth = 380;
     ctx.beginPath();
@@ -133,18 +120,15 @@
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
     ctx.stroke();
 
-    // 主線
     ctx.strokeStyle = C.route;
     ctx.lineWidth = 90;
     ctx.stroke();
 
-    // 中心細白線（更容易看出走向）
     ctx.strokeStyle = 'rgba(255,255,255,0.45)';
     ctx.lineWidth = 18;
     ctx.stroke();
     ctx.restore();
 
-    // 沿線流動箭頭
     const offset = cfg.nav.chevronSpeed > 0 ? (now / 1000) * cfg.nav.chevronSpeed : 0;
     ctx.save();
     ctx.fillStyle = C.chevron;
@@ -163,7 +147,6 @@
     });
     ctx.restore();
 
-    // 起點圈
     const sp = pts[0];
     ctx.save();
     ctx.strokeStyle = C.marker;
@@ -175,7 +158,6 @@
     ctx.fill();
     ctx.restore();
 
-    // 終點：脈動光圈 + 旗
     const dp = pts[pts.length - 1];
     const pulse = 0.5 + 0.5 * Math.sin(now / 380);
     ctx.save();
@@ -188,7 +170,6 @@
     ctx.beginPath();
     ctx.arc(dp.x, dp.y, 240, 0, Math.PI * 2);
     ctx.fill();
-    // 旗桿 + 旗面
     ctx.strokeStyle = C.dest;
     ctx.lineWidth = 45;
     ctx.beginPath();
@@ -205,11 +186,10 @@
     ctx.restore();
   }
 
-  /* ---------- 虛擬標記（等我的圓圈） ---------- */
   function drawMarker(ctx, state) {
     if (!state.marker) return;
     const m = state.marker;
-    if (G.dist(m, state.user) < 60) return;   // 跟目前位置重疊就不畫
+    if (G.dist(m, state.user) < 60) return;
 
     ctx.save();
     ctx.strokeStyle = 'rgba(0,255,204,0.85)';
@@ -220,7 +200,6 @@
     ctx.stroke();
     ctx.restore();
 
-    // 從箭頭（目前位置）到標記的虛線
     ctx.save();
     ctx.strokeStyle = 'rgba(0,255,204,0.30)';
     ctx.lineWidth = 26;
@@ -232,7 +211,6 @@
     ctx.restore();
   }
 
-  /* ---------- 電掣 ---------- */
   function drawDevices(ctx) {
     ctx.save();
     for (const code in L.devices) {
@@ -248,7 +226,6 @@
     ctx.restore();
   }
 
-  /* ---------- 螢幕座標標籤 ---------- */
   function drawLabels(ctx, cam) {
     const showRooms = cam.scale > 0.014;
     const showDevices = cam.scale > 0.03;
@@ -287,10 +264,9 @@
     ctx.restore();
   }
 
-  /* ---------- 北向指示（地圖旋轉時看這個） ---------- */
   function drawNorth(ctx, cam) {
     const r = 52;
-    const v = G.rotate({ x: 0, y: -1 }, cam.rot);   // 世界北方在螢幕上的方向
+    const v = G.rotate({ x: 0, y: -1 }, cam.rot);
     const cx = cam.focus.x + v.x * r;
     const cy = cam.focus.y + v.y * r;
 
@@ -311,16 +287,16 @@
     ctx.restore();
   }
 
-  /* ---------- 紅箭頭（永遠在焦點，方向 = 方位角 + 地圖旋轉） ---------- */
+  /* ---------- 紅箭頭（僅依據感應器方位，不受地圖旋轉影響） ---------- */
   function drawArrow(ctx, cam, state) {
     const cx = cam.focus.x;
     const cy = cam.focus.y;
-    const ang = G.rad(state.arrowHeading) + cam.rot;
+    // 這裡移除了 + cam.rot，確保手機轉動時箭頭才轉，地圖旋轉不影響箭頭本身的指向
+    const ang = G.rad(state.arrowHeading);
 
     ctx.save();
     ctx.translate(cx, cy);
 
-    // 光暈
     const grd = ctx.createRadialGradient(0, 0, 0, 0, 0, 56);
     grd.addColorStop(0, 'rgba(255,60,110,0.28)');
     grd.addColorStop(1, 'rgba(255,60,110,0)');
@@ -329,7 +305,6 @@
     ctx.arc(0, 0, 56, 0, Math.PI * 2);
     ctx.fill();
 
-    // 定位圈
     ctx.strokeStyle = 'rgba(255,255,255,0.16)';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -339,7 +314,6 @@
     ctx.save();
     ctx.rotate(ang);
 
-    // 前方的虛線：用來肉眼檢查「箭頭方向」與「導航線」是否成一直線
     if (state.route) {
       ctx.strokeStyle = 'rgba(255,80,120,0.55)';
       ctx.lineWidth = 2;
@@ -351,7 +325,6 @@
       ctx.setLineDash([]);
     }
 
-    // 箭頭本體
     ctx.beginPath();
     ctx.moveTo(0, -24);
     ctx.lineTo(-14, 14);
@@ -368,15 +341,12 @@
     ctx.restore();
   }
 
-  /* ---------- 主繪製 ---------- */
   function frame(ctx, cam, state, now) {
     ctx.setTransform(cam.dpr, 0, 0, cam.dpr, 0, 0);
 
-    // 背景
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, cam.vw, cam.vh);
 
-    // 地圖
     ctx.save();
     cam.applyTo(ctx);
     drawFloor(ctx);
@@ -388,7 +358,6 @@
     drawMarker(ctx, state);
     ctx.restore();
 
-    // 螢幕座標覆蓋層
     drawLabels(ctx, cam);
     drawNorth(ctx, cam);
     drawArrow(ctx, cam, state);
