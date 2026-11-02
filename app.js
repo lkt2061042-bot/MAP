@@ -308,6 +308,9 @@
   app.updatePanelInset();
   cam.jumpTo(state.user);
 
+  // 非 iOS 直接開始監聽感應器（iOS 一定要使用者手勢，仍要按按鈕）
+  S.autoStart();
+
   // 背景先建好導航網格，避免第一次規劃時卡頓
   setTimeout(function () { Nav.build(); }, 60);
 
