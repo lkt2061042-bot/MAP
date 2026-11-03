@@ -28,6 +28,17 @@
             justify-content: center;
             align-items: center;
         }
+        /* 固定不動的背景長方形 */
+        #bg-rect {
+            position: absolute;
+            width: 300px;
+            height: 180px;
+            background-color: #222222;
+            border: 2px solid #444444;
+            border-radius: 12px;
+            z-index: 1;
+        }
+        /* 會跟著旋轉的紅色箭咀 */
         #arrow {
             width: 0;
             height: 0;
@@ -37,6 +48,7 @@
             position: absolute;
             transform-origin: 50% 65%;
             will-change: transform;
+            z-index: 2;
         }
         #permission-btn {
             position: absolute;
@@ -58,6 +70,7 @@
 
     <div id="container">
         <button id="permission-btn">啟用陀螺儀</button>
+        <div id="bg-rect"></div>
         <div id="arrow"></div>
     </div>
 
@@ -66,23 +79,12 @@
         const btn = document.getElementById('permission-btn');
 
         function handleOrientation(event) {
-            // gamma: 左右傾斜 (-90 到 90)
-            // beta: 前後傾斜 (-180 到 180)
-            // alpha: 方位角 (0 到 360)
-            let gamma = event.gamma || 0;
-            let beta = event.beta || 0;
             let alpha = event.alpha || 0;
-
-            // 為了讓箭咀在畫面直立或平放時都能自然指向，這裡綜合 alpha 與 gamma 計算旋轉角度
-            // 當手機平放時，主要由 alpha 控制方向；當手機直立時，主要結合 gamma 和 alpha
-            let rotation = alpha - gamma;
-            
-            arrow.style.transform = `rotate(${rotation}deg)`;
+            arrow.style.transform = `rotate(${alpha}deg)`;
         }
 
         function initSensor() {
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                // iOS 13+ 裝置需要權限請求
                 DeviceOrientationEvent.requestPermission()
                     .then(permissionState => {
                         if (permissionState === 'granted') {
@@ -94,13 +96,11 @@
                     })
                     .catch(console.error);
             } else {
-                // Android 及其他支援的裝置
                 window.addEventListener('deviceorientation', handleOrientation, true);
                 btn.style.display = 'none';
             }
         }
 
-        // 偵測是否需要手動點擊按鈕授權 (主要針對 iOS)
         if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
             btn.style.display = 'block';
             btn.addEventListener('click', initSensor);
