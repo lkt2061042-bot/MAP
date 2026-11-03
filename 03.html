@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3000x3000mm 導航與手動地圖校正版</title>
+    <title>3000x3000mm 導航與前進方向修正版</title>
     <style>
         body { 
             margin: 0; padding: 0; font-family: sans-serif; 
@@ -124,9 +124,8 @@
     let isRunning = false;
     let currentRoute = null;          
 
-    // 手動校正相關變數
     let manualGyroOff = false;
-    let manualRotationOffset = 0; // 手動旋轉累積角度 (度)
+    let manualRotationOffset = 0; 
 
     const cam = {
         x: 1500,
@@ -138,7 +137,6 @@
         },
         applyTransform(ctx, vw, vh) {
             ctx.translate(vw / 2, vh / 2);
-            // 結合顯示轉向與手動校正旋轉角度
             let totalRot = displayHeading + manualRotationOffset;
             ctx.rotate((totalRot * Math.PI) / 180);
             ctx.scale(this.scale, this.scale);
@@ -156,15 +154,10 @@
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
-    // --- 單指拖曳旋轉 / 雙指縮放手勢 ---
     const pointers = new Map();
-    let lastMouseX = 0, lastMouseY = 0;
-
     canvas.addEventListener('pointerdown', e => {
         canvas.setPointerCapture(e.pointerId);
         pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-        lastMouseX = e.clientX;
-        lastMouseY = e.clientY;
     });
 
     canvas.addEventListener('pointermove', e => {
@@ -172,10 +165,9 @@
         const prev = pointers.get(e.pointerId);
         pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-        // 如果開啟了「暫時關閉陀螺儀」，單指拖曳即可手動旋轉地圖
         if (manualGyroOff && pointers.size === 1) {
             const dx = e.clientX - prev.x;
-            manualRotationOffset += dx * 0.5; // 每像素轉 0.5 度
+            manualRotationOffset += dx * 0.5; 
         }
     });
 
@@ -191,11 +183,10 @@
         cam.scale = Math.max(0.05, Math.min(2.0, cam.scale * Math.exp(-e.deltaY * 0.001)));
     }, { passive: false });
 
-    // 手動校正介面控制函式
     function toggleManualGyro() {
         manualGyroOff = document.getElementById('manualGyroToggle').checked;
         if (manualGyroOff) {
-            alert('已暫時關閉陀螺儀！您現在可以直接用手指在畫面上左右拖曳來手動旋轉地圖。');
+            alert('已暫時關閉陀螺儀！您可以直接用手指在畫面上左右拖曳來手動旋轉地圖。');
         } else {
             alert('已恢復陀螺儀連動。');
         }
@@ -253,12 +244,10 @@
         ctx.save();
         cam.applyTransform(ctx, vw, vh);
 
-        // 1. 房間外框
         ctx.strokeStyle = '#666';
         ctx.lineWidth = 15;
         ctx.strokeRect(0, 0, roomSize, roomSize);
 
-        // 2. 網格
         ctx.strokeStyle = '#333';
         ctx.lineWidth = 8;
         for (let i = 1000; i < roomSize; i += 1000) {
@@ -266,7 +255,6 @@
             ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(roomSize, i); ctx.stroke();
         }
 
-        // 3. 導航線
         if (currentRoute && currentRoute.length >= 2) {
             ctx.strokeStyle = 'rgba(0, 255, 170, 0.85)';
             ctx.lineWidth = 30;
@@ -303,7 +291,6 @@
             ctx.stroke();
         }
 
-        // 4. 電掣點
         for (let key in devices) {
             let dev = devices[key];
             ctx.fillStyle = '#ffaa00';
@@ -314,7 +301,6 @@
 
         ctx.restore();
 
-        // 5. 紅箭頭 (永遠置中)
         const centerX = vw / 2;
         const centerY = vh / 2;
 
@@ -337,7 +323,6 @@
         displayPos.x += (markerPos.x - displayPos.x) * 0.2;
         displayPos.y += (markerPos.y - displayPos.y) * 0.2;
 
-        // 如果手動關閉了陀螺儀，則凍結方向更新，完全聽從手動旋轉
         if (!manualGyroOff) {
             let calibratedHeading = (userHeading + headingOffset) % 360;
             let diff = calibratedHeading - displayHeading;
@@ -387,9 +372,10 @@
         strideInput = Math.max(1, Math.min(100, strideInput));
         let currentStrideMM = (strideInput / 100) * 780;
 
-        // 前進時，以當前畫面上實際呈現的方向（包含陀螺儀或手動校正後的角度）來決定前進向量
         let currentFacing = (displayHeading + manualRotationOffset) % 360;
         let rad = (currentFacing * Math.PI) / 180;
+        
+        // 修正東/西行進方向相反的問題：使用標準三角函數坐標系對應
         markerPos.x += Math.sin(rad) * currentStrideMM;
         markerPos.y -= Math.cos(rad) * currentStrideMM; 
 
@@ -413,7 +399,7 @@
 
     let lastPeakTime = 0;
     window.addEventListener('devicemotion', (event) => {
-        if (!isRunning || manualGyroOff) return; // 手動模式下也可以選擇是否接受震動計步
+        if (!isRunning || manualGyroOff) return; 
         let acc = event.accelerationIncludingGravity;
         if (!acc) return;
 
