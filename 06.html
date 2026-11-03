@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>陀螺儀紅箭咀方向指示</title>
+    <title>Google Maps 風格無 GPS 羅盤</title>
     <style>
         * {
             margin: 0;
@@ -18,7 +18,8 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            font-family: sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            user-select: none;
         }
         #container {
             position: relative;
@@ -28,59 +29,160 @@
             justify-content: center;
             align-items: center;
         }
-        /* 固定不動的背景長方形 */
+        /* 固定不動的背景地圖格線風格長方形 */
         #bg-rect {
             position: absolute;
-            width: 300px;
-            height: 180px;
-            background-color: #222222;
-            border: 2px solid #444444;
-            border-radius: 12px;
+            width: 320px;
+            height: 200px;
+            background-color: #1a1d21;
+            border: 2px solid #333a42;
+            border-radius: 16px;
             z-index: 1;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
         }
-        /* 會跟著旋轉的紅色箭咀 */
+        /* Google Maps 風格的指針 container */
+        #arrow-wrapper {
+            position: absolute;
+            width: 120px;
+            height: 120px;
+            z-index: 2;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            will-change: transform;
+        }
+        /* 紅色箭咀主體 */
         #arrow {
             width: 0;
             height: 0;
-            border-left: 40px solid transparent;
-            border-right: 40px solid transparent;
-            border-bottom: 120px solid #ff0000;
-            position: absolute;
-            transform-origin: 50% 65%;
-            will-change: transform;
-            z-index: 2;
+            border-left: 20px solid transparent;
+            border-right: 20px solid transparent;
+            border-bottom: 60px solid #ff3b30;
+            filter: drop-shadow(0px 4px 8px rgba(255, 59, 48, 0.5));
         }
         #permission-btn {
             position: absolute;
-            padding: 15px 30px;
-            background-color: #ff0000;
+            top: 30px;
+            padding: 12px 24px;
+            background-color: #ff3b30;
             color: #ffffff;
             border: none;
-            border-radius: 8px;
-            font-size: 18px;
-            font-weight: bold;
+            border-radius: 20px;
+            font-size: 15px;
+            font-weight: 600;
             cursor: pointer;
             z-index: 10;
             display: none;
-            box-shadow: 0 4px 15px rgba(255, 0, 0, 0.4);
+            box-shadow: 0 4px 15px rgba(255, 59, 48, 0.4);
+        }
+        /* 虛擬控制區塊 */
+        #controls {
+            position: absolute;
+            bottom: 30px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            z-index: 10;
+        }
+        .btn-group {
+            display: flex;
+            gap: 12px;
+        }
+        .control-btn {
+            width: 50px;
+            height: 50px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            color: #ffffff;
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(10px);
+        }
+        .control-btn:active {
+            background-color: rgba(255, 59, 48, 0.5);
+        }
+        #angle-display {
+            color: #aaaaaa;
+            font-size: 13px;
+            font-family: monospace;
         }
     </style>
 </head>
 <body>
 
     <div id="container">
-        <button id="permission-btn">啟用陀螺儀</button>
+        <button id="permission-btn">啟用手機感應器</button>
         <div id="bg-rect"></div>
-        <div id="arrow"></div>
+        
+        <div id="arrow-wrapper">
+            <div id="arrow"></div>
+        </div>
+
+        <div id="controls">
+            <div id="angle-display">Heading: 0°</div>
+            <div class="btn-group">
+                <button class="control-btn" id="btn-left">↺</button>
+                <button class="control-btn" id="btn-reset">R</button>
+                <button class="control-btn" id="btn-right">↻</button>
+            </div>
+        </div>
     </div>
 
     <script>
-        const arrow = document.getElementById('arrow');
-        const btn = document.getElementById('permission-btn');
+        const arrowWrapper = document.getElementById('arrow-wrapper');
+        const btnPermission = document.getElementById('permission-btn');
+        const angleDisplay = document.getElementById('angle-display');
+        const btnLeft = document.getElementById('btn-left');
+        const btnRight = document.getElementById('btn-right');
+        const btnReset = document.getElementById('btn-reset');
+
+        let manualHeading = 0;
+        let intervalId = null;
+
+        // 計算 Google Maps 姿態演算法 (將 Alpha, Beta, Gamma 轉換為絕對平面 Heading)
+        function computeHeading(alpha, beta, gamma) {
+            const _x = beta ? beta * Math.PI / 180 : 0; // Pitch
+            const _y = gamma ? gamma * Math.PI / 180 : 0; // Roll
+            const _z = alpha ? alpha * Math.PI / 180 : 0; // Yaw
+
+            const cX = Math.cos(_x);
+            const cY = Math.cos(_y);
+            const cZ = Math.cos(_z);
+            const sX = Math.sin(_x);
+            const sY = Math.sin(_y);
+            const sZ = Math.sin(_z);
+
+            // 計算 3D 空間中的方向矩陣
+            const Vx = -cZ * sY - sZ * sX * cY;
+            const Vy = -sZ * sY + cZ * sX * cY;
+
+            // 算回水平地面的角度 Heading (0 - 360)
+            let heading = Math.atan2(Vx, Vy) * (180 / Math.PI);
+            if (heading < 0) {
+                heading += 360;
+            }
+            return heading;
+        }
+
+        function updateDisplay(heading) {
+            arrowWrapper.style.transform = `rotate(${heading}deg)`;
+            angleDisplay.textContent = `Heading: ${Math.round(heading)}°`;
+        }
 
         function handleOrientation(event) {
-            let alpha = event.alpha || 0;
-            arrow.style.transform = `rotate(${alpha}deg)`;
+            // iOS 有專屬的 webkitCompassHeading（磁力計真實指向），比一般的 alpha 更精準
+            if (event.webkitCompassHeading) {
+                updateDisplay(event.webkitCompassHeading);
+            } else if (event.alpha !== null) {
+                // Android 或非 iOS 裝置使用三軸矩陣融合成的 Heading
+                let heading = computeHeading(event.alpha, event.beta, event.gamma);
+                updateDisplay(heading);
+            }
         }
 
         function initSensor() {
@@ -89,21 +191,53 @@
                     .then(permissionState => {
                         if (permissionState === 'granted') {
                             window.addEventListener('deviceorientation', handleOrientation, true);
-                            btn.style.display = 'none';
+                            btnPermission.style.display = 'none';
                         } else {
-                            alert('需要授權才能使用陀螺儀');
+                            alert('需要授權才能使用陀螺儀/羅盤功能');
                         }
                     })
                     .catch(console.error);
             } else {
                 window.addEventListener('deviceorientation', handleOrientation, true);
-                btn.style.display = 'none';
+                btnPermission.style.display = 'none';
             }
         }
 
+        // 虛擬鍵模擬旋轉
+        function startRotate(step) {
+            if (intervalId) clearInterval(intervalId);
+            manualHeading = (manualHeading + step + 360) % 360;
+            updateDisplay(manualHeading);
+            intervalId = setInterval(() => {
+                manualHeading = (manualHeading + step + 360) % 360;
+                updateDisplay(manualHeading);
+            }, 30);
+        }
+
+        function stopRotate() {
+            if (intervalId) {
+                clearInterval(intervalId);
+                intervalId = null;
+            }
+        }
+
+        btnLeft.addEventListener('mousedown', () => startRotate(-3));
+        btnLeft.addEventListener('touchstart', (e) => { e.preventDefault(); startRotate(-3); });
+
+        btnRight.addEventListener('mousedown', () => startRotate(3));
+        btnRight.addEventListener('touchstart', (e) => { e.preventDefault(); startRotate(3); });
+
+        btnReset.addEventListener('click', () => {
+            manualHeading = 0;
+            updateDisplay(0);
+        });
+
+        window.addEventListener('mouseup', stopRotate);
+        window.addEventListener('touchend', stopRotate);
+
         if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-            btn.style.display = 'block';
-            btn.addEventListener('click', initSensor);
+            btnPermission.style.display = 'block';
+            btnPermission.addEventListener('click', initSensor);
         } else {
             initSensor();
         }
