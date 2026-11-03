@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3000x3000mm 導航與陀螺儀恢復版</title>
+    <title>3000x3000mm 導航與自動校正移動版</title>
     <style>
         body { 
             margin: 0; padding: 0; font-family: sans-serif; 
@@ -39,24 +39,12 @@
     </div>
 
     <div class="bottom-panel">
-        <!-- 地圖校正區 -->
-        <div class="group-box" style="background: #1f2937; border: 1px solid #374151;">
-            <div style="font-weight: bold; margin-bottom: 2px; color: #fbbf24;">地圖方向手動校正</div>
-            <div class="flex-center">
-                <label style="cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 13px;">
-                    <input type="checkbox" id="manualGyroToggle" onchange="toggleManualGyro()" style="width: 18px; height: 18px;">
-                    暫時關閉陀螺儀 (手動調整模式)
-                </label>
-            </div>
-            <div class="row" style="margin-top: 4px;">
-                <button onclick="rotateManualMap(-15)" style="background: #374151; font-size: 12px;">↺ 轉向 -15°</button>
-                <button onclick="rotateManualMap(15)" style="background: #374151; font-size: 12px;">↻ 轉向 +15°</button>
-                <button onclick="resetManualRot()" style="background: #374151; font-size: 12px;">重置角度</button>
-            </div>
-            <div class="hint" style="font-size: 11px; color: #9ca3af; margin-top: 2px;">提示：啟用陀螺儀後，轉動手機即會改變紅點前進方向</div>
+        <!-- 模擬跨一步按鈕放在起點上方 -->
+        <div style="margin-top: 4px;">
+            <button class="test" onclick="simulateStep()">模擬跨一步 (+步數)</button>
         </div>
 
-        <!-- 導航規劃區 -->
+        <!-- 導航規劃區（起點與終點設定） -->
         <div class="group-box">
             <div style="font-weight: bold; margin-bottom: 2px; color: #00ffcc;">導航規劃</div>
             <div class="flex-center">
@@ -78,7 +66,7 @@
                     <option value="SW-304">SW-304 (西牆)</option>
                 </select>
             </div>
-            <button class="nav-btn" onclick="startNavigation()" style="margin-top: 6px;">確定並自動校正面向導航線</button>
+            <button class="nav-btn" onclick="startNavigation()" style="margin-top: 6px;">確定導航（自動移動起點，不旋轉）</button>
         </div>
 
         <div style="margin-top: 6px;"><strong>步數與參數設定</strong></div>
@@ -90,7 +78,6 @@
         </div>
 
         <div class="row" style="margin-top: 4px;">
-            <button class="test" onclick="simulateStep()">模擬跨一步</button>
             <button class="warning" onclick="waitMarker()">等等我</button>
             <button class="success" onclick="syncPositionAtMarker()">到標記位</button>
         </div>
@@ -119,15 +106,11 @@
     
     let userHeading = 0;              
     let displayHeading = 0;           
-    let headingOffset = 0;            
     let stepCount = 0;
     let isRunning = false;
     let currentRoute = null;          
 
-    let manualGyroOff = false;
-    let manualRotationOffset = 0; 
-
-    // Camera 鏡頭：只做平移與縮放追蹤紅點，地圖本身固定不旋轉
+    // Camera 鏡頭：只跟隨紅點平移與縮放，地圖固定不旋轉
     const cam = {
         x: 1500,
         y: 2500,
@@ -153,7 +136,7 @@
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
-    // 支援雙指縮放或拖曳檢視地圖
+    // 支援縮放與平移
     const pointers = new Map();
     canvas.addEventListener('pointerdown', e => {
         canvas.setPointerCapture(e.pointerId);
@@ -177,34 +160,11 @@
         cam.scale = Math.max(0.05, Math.min(2.0, cam.scale * Math.exp(-e.deltaY * 0.001)));
     }, { passive: false });
 
-    function toggleManualGyro() {
-        manualGyroOff = document.getElementById('manualGyroToggle').checked;
-        if (manualGyroOff) {
-            alert('已暫時關閉陀螺儀連動。');
-        } else {
-            alert('已恢復陀螺儀連動。');
-        }
-    }
-
-    function rotateManualMap(deg) {
-        manualRotationOffset = (manualRotationOffset + deg) % 360;
-    }
-
-    function resetManualRot() {
-        manualRotationOffset = 0;
-        alert('已重置手動角度');
-    }
-
     function getDist(p1, p2) {
         return Math.hypot(p2.x - p1.x, p2.y - p1.y);
     }
 
-    function getBearing(p1, p2) {
-        let rad = Math.atan2(p2.x - p1.x, p1.y - p2.y);
-        let deg = (rad * 180) / Math.PI;
-        return (deg + 360) % 360;
-    }
-
+    // 自動校正時：只移動起點坐標到指定電掣，不改變任何旋轉角度
     function startNavigation() {
         const startVal = document.getElementById('startSelect').value;
         const destVal = document.getElementById('destSelect').value;
@@ -212,8 +172,12 @@
         let startPt = { x: userPos.x, y: userPos.y };
         if (startVal !== 'current' && devices[startVal]) {
             startPt = { x: devices[startVal].x, y: devices[startVal].y };
-            userPos.x = startPt.x; userPos.y = startPt.y;
-            markerPos.x = startPt.x; markerPos.y = startPt.y;
+            userPos.x = startPt.x; 
+            userPos.y = startPt.y;
+            markerPos.x = startPt.x; 
+            markerPos.y = startPt.y;
+            displayPos.x = startPt.x; 
+            displayPos.y = startPt.y;
         }
 
         if (!devices[destVal]) {
@@ -223,11 +187,7 @@
         let destPt = { x: devices[destVal].x, y: devices[destVal].y };
 
         currentRoute = [startPt, destPt];
-
-        const targetBearing = getBearing(startPt, destPt);
-        headingOffset = (targetBearing - userHeading + 360) % 360;
-
-        alert(`導航已設定！自動校正方位：${Math.round(targetBearing)}°`);
+        alert(`導航已設定！已自動將起點移動至：${startVal === 'current' ? '目前位置' : devices[startVal].name}（地圖維持固定不旋轉）`);
     }
 
     function drawRoom() {
@@ -294,7 +254,7 @@
             ctx.fillText(key, dev.x + 70, dev.y + 30);
         }
 
-        // 2. 繪製移動中的紅點（在地圖上的實際座標）
+        // 2. 繪製紅點
         ctx.fillStyle = '#ff3366';
         ctx.beginPath();
         ctx.arc(displayPos.x, displayPos.y, 45, 0, Math.PI * 2);
@@ -310,13 +270,10 @@
         displayPos.x += (markerPos.x - displayPos.x) * 0.2;
         displayPos.y += (markerPos.y - displayPos.y) * 0.2;
 
-        if (!manualGyroOff) {
-            let calibratedHeading = (userHeading + headingOffset) % 360;
-            let diff = calibratedHeading - displayHeading;
-            if (diff > 180) diff -= 360;
-            if (diff < -180) diff += 360;
-            displayHeading += diff * 0.2;
-        }
+        let diff = userHeading - displayHeading;
+        if (diff > 180) diff -= 360;
+        if (diff < -180) diff += 360;
+        displayHeading += diff * 0.2;
 
         cam.follow(displayPos);
 
@@ -347,7 +304,7 @@
         let heading = event.alpha;
         if (heading !== null) {
             userHeading = heading;
-            document.getElementById('heading').innerText = Math.round((userHeading + headingOffset + manualRotationOffset) % 360);
+            document.getElementById('heading').innerText = Math.round(userHeading);
         }
     }
 
@@ -359,10 +316,7 @@
         strideInput = Math.max(1, Math.min(100, strideInput));
         let currentStrideMM = (strideInput / 100) * 780;
 
-        // 核心：根據陀螺儀角度與手動校正角度，計算紅點在地圖世界座標中的前進向量
-        let currentFacing = (userHeading + headingOffset + manualRotationOffset) % 360;
-        let rad = (currentFacing * Math.PI) / 180;
-
+        let rad = (userHeading * Math.PI) / 180;
         markerPos.x += Math.sin(rad) * currentStrideMM;
         markerPos.y -= Math.cos(rad) * currentStrideMM; 
 
@@ -386,7 +340,7 @@
 
     let lastPeakTime = 0;
     window.addEventListener('devicemotion', (event) => {
-        if (!isRunning || manualGyroOff) return; 
+        if (!isRunning) return; 
         let acc = event.accelerationIncludingGravity;
         if (!acc) return;
 
